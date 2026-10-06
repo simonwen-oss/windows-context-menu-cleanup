@@ -1,0 +1,22 @@
+# Registry backups produced by the removal script
+context-menu-backup-*/
+*.reg
+
+# Local overrides
+my-vendors.json
+
+# Build output for the (unreleased) native executable.
+# The .cs source is tracked so work on it can continue; the binary is not part of
+# the 1.0.0 release and is not committed.
+src/dist/
+src/bin/
+src/obj/
+*.exe
+*.pdb
+
+# Editor / OS noise
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
