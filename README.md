@@ -326,6 +326,9 @@ Copy-Item . "$env:USERPROFILE\.dsh\skills\windows-context-menu-cleanup" -Recurse
 ## 故障排查
 
 完整清单见 [`references/troubleshooting.md`](./references/troubleshooting.md)。
+另有一份更直白的 [`references/lessons-learned.md`](./references/lessons-learned.md)，
+记录了开发过程中**判断错的地方**（包括"报成功但零字节删除"、"误把中文注释当元凶"等）
+以及全部 PowerShell 5.1 的具体坑——如果这份 README 的描述与实际不符，那里有答案。
 代价最高的几条：
 
 | 现象 | 原因 |
