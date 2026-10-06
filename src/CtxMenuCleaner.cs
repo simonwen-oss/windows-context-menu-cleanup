@@ -476,8 +476,14 @@ namespace CtxMenuCleaner
 
         // Diagnostic: can this process write to the registry at all? Used to distinguish
         // "our logic picked the wrong view" from "this process token cannot write".
+        //
+        // SIDE EFFECT: this creates one throwaway key under
+        // HKCU\SOFTWARE\Classes\*\shellex\ContextMenuHandlers and removes it again. Nothing
+        // else is touched, and no delete of a real key is performed.
         private static int SelfTest()
         {
+            Console.WriteLine("Note: this check creates one throwaway key under HKCU and removes it again.");
+            Console.WriteLine();
             Console.WriteLine("=== identity ===");
             try
             {
@@ -495,7 +501,9 @@ namespace CtxMenuCleaner
             Console.WriteLine("  64-bit    : " + (IntPtr.Size == 8));
 
             string rel = "*\\shellex\\ContextMenuHandlers";
-            string name = "    SelfTestProbe";
+            // Deliberately unusual so it cannot collide with a real extension. Written and
+            // removed wholly inside this method (see the cleanup step at the end).
+            string name = "    CtxMenuCleanerWriteProbe";
             string full = "SOFTWARE\\Classes\\" + rel + "\\" + name;
 
             foreach (string view in new string[] { "64", "32" })
