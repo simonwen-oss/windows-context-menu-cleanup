@@ -177,14 +177,16 @@ if (-not (Test-Path -LiteralPath $notesFile)) { throw "release notes not found: 
 $notes = [System.IO.File]::ReadAllText($notesFile)
 
 try {
+    # Name the release after $Tag - a hard-coded string here once produced a release
+    # titled "v1.0.0" carrying the v1.1.0 tag.
     $null = Api 'POST' "/repos/$Owner/$Repo/releases" @{
-        tag_name = $Tag
-        name     = "v1.0.0"
-        body     = $notes
-        draft    = $false
+        tag_name   = $Tag
+        name       = $Tag
+        body       = $notes
+        draft      = $false
         prerelease = $false
     }
-    Write-Host "  release v1.0.0 created" -ForegroundColor Green
+    Write-Host "  release $Tag created" -ForegroundColor Green
 } catch {
     Write-Host "  release step: $($_.Exception.Message)" -ForegroundColor Yellow
 }
