@@ -3,6 +3,32 @@
 All notable changes to this project are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `src/CtxMenuCleaner.cs` + `src/build.ps1` — a native `CtxMenuCleaner.exe`, compiled
+  with the C# compiler bundled with Windows. It reads **both** registry views in one
+  process through `RegistryKey.OpenBaseKey`, which Windows PowerShell 5.1 cannot do, so
+  it has no PowerShell version dependency. **Working but unreleased**; the binary is not
+  committed. See [`references/exe.md`](./references/exe.md).
+- `src/publish.ps1` — maintainer tool that publishes a release through the GitHub REST
+  API (create repo, upload files, tag, Release, topics). No git installation required.
+- `references/exe.md` — build, usage and the measured non-ASCII-path limitation.
+
+### Fixed
+
+- Native executable: deletion failed with
+  `OpenSubKey(writable) ... SecurityException HR=0x8013150A` for **every** key. Root
+  cause was not the logic but the launch location: a binary started from a
+  non-ASCII/OneDrive-synced folder could not write to HKCU at all, while the identical
+  binary copied to an ASCII path could. `build.ps1` now stages compilation in an
+  ASCII-only temp directory and outputs to `%LOCALAPPDATA%\CtxMenuCleaner\` by default,
+  and the exe gained `--selftest` to expose the condition.
+- Native executable: the same key is discoverable through both registry views because
+  `HKCU\SOFTWARE\Classes` is a single shared store. Entries are now deduplicated by
+  logical path, preferring the view that can actually write.
+
 ## [1.0.0] - 2026-10-04
 
 First public release. **PowerShell only** — no compiled binary.
@@ -22,8 +48,8 @@ First public release. **PowerShell only** — no compiled binary.
 - `scripts/validate.ps1` — self-check: JSON loading, `\uXXXX` decoding, script
   parsing, ASCII-only source, and a dry run. Runs under Windows PowerShell 5.1.
 - `scripts/vendors.json` — 7 vendor entries, 25 patterns.
-- Docs: `README.md`, `README.zh.md`, `SKILL.md`, `references/field-notes.md`,
-  `references/troubleshooting.md`.
+- Docs: `README.md` (Chinese, shown by default on GitHub), `README.en.md` (English),
+  `SKILL.md`, `references/field-notes.md`, `references/troubleshooting.md`.
 
 ### Key behaviours
 
