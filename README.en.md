@@ -6,9 +6,9 @@ verification and a working rollback path.
 
 [中文说明](./README.md) · [Changelog](./CHANGELOG.md) · MIT
 
-**Current release: v1.0.0 — PowerShell only.** A compiled executable
-(`CtxMenuCleaner.exe`) is in development under `src/` and is **not** part of this
-release; see [Roadmap](#roadmap).
+**Current release: v1.1.0.** PowerShell tooling plus a **working native executable**
+(`CtxMenuCleaner.exe`; source under `src/`, the binary is not committed). See
+[references/exe.md](./references/exe.md).
 
 ---
 
@@ -361,22 +361,70 @@ are recorded in [`references/field-notes.md`](./references/field-notes.md).
 
 ## Roadmap
 
-- **v1.0.0 (this release)** — PowerShell tooling, no compiled binary.
-- **v2 (working, unreleased)** — `CtxMenuCleaner.exe`, a native C# build compiled with
-  the C# compiler that ships with Windows. It reads both registry views in **one**
-  process via `RegistryKey.OpenBaseKey` — which PowerShell 5.1 cannot do — so it has no
-  PowerShell version dependency. Source and build script are in `src/`; the binary is
-  not committed. See [references/exe.md](./references/exe.md).
+- **v1.0.0** — PowerShell tooling, no compiled binary.
+- **v1.1.0 (this release)** — adds the working native `CtxMenuCleaner.exe`, the
+  `src/publish.ps1` release tool, and a batch of executable fixes (see
+  [CHANGELOG](./CHANGELOG.md)).
+- **Later** — interactive input timing can still be consumed by a preceding prompt on
+  some terminals; prefer `--select N --yes` (see
+  [references/exe.md](./references/exe.md)).
 
-  ```powershell
-  .\src\build.ps1 -Test        # builds to %LOCALAPPDATA%\CtxMenuCleaner\
-  ```
+## The native executable (CtxMenuCleaner.exe)
 
-  ⚠️ **Do not run the exe from a non-ASCII or OneDrive-synced folder.** On the test
-  machine, a binary launched from `C:\Users\<user>\OneDrive\文档\...` could not write to
-  the registry at all, while the identical binary copied to an ASCII path worked. This
-  is why the build output defaults to `%LOCALAPPDATA%`. Verify with
-  `CtxMenuCleaner.exe --selftest`.
+Compiled with the C# compiler that ships with Windows: **single file, no dependencies,
+no PowerShell**. It reads **both** registry views in one process via
+`RegistryKey.OpenBaseKey` — which PowerShell 5.1 cannot do — so it has no PowerShell
+version dependency at all.
+
+Full details in [references/exe.md](./references/exe.md). The essentials:
+
+```powershell
+# Build (output goes to %LOCALAPPDATA%\CtxMenuCleaner\, deliberately avoiding non-ASCII paths)
+.\src\build.ps1 -Test
+
+$ctx = "$env:LOCALAPPDATA\CtxMenuCleaner\CtxMenuCleaner.exe"
+
+# See the list (no admin needed, changes nothing)
+& $ctx --list
+
+# Dry run (deletes nothing)
+& $ctx --select 4 --dry-run
+
+# Remove (--yes skips the confirmation, so it reads no keyboard input at all - recommended)
+& $ctx --select 4 --yes
+
+# Interactive: it lists first, waits for your numbers at "Selection:",
+# then requires you to type an upper-case YES at "Type YES to confirm:" before deleting.
+& $ctx
+```
+
+> **One easy trap in interactive mode**: after you enter the numbers, the program stops
+> and requires **`YES`** (three upper-case letters) before it deletes anything. Anything
+> else — including a bare Enter — just cancels. Use `--yes` to skip that step.
+
+**Common options**
+
+| Option | Meaning |
+|---|---|
+| `--list` | list only |
+| `--all` | include Windows built-ins in the list |
+| `--select N[,M...]` | remove these slot numbers |
+| `--dry-run` | show what would happen, delete nothing |
+| `--yes` | skip the `Type YES` confirmation |
+| `--grid` | pick with a searchable check-box window |
+| `--auto-elevate` | re-launch elevated without asking `[Y/n]` |
+| `--no-restart` | do not restart Explorer |
+| `--no-backup` | skip the `.reg` backups (not recommended) |
+| `--backup-dir D` | where to write backups |
+| `--selftest` | report whether this process can write to HKCU (diagnoses the path issue) |
+| `--stdin-info` | report whether stdin is a real terminal (diagnoses input issues) |
+| `--log <file>` | record what every prompt actually read (diagnoses input issues) |
+| `--keep-open` | wait for Enter before exiting, so the window cannot vanish |
+
+⚠️ **Do not run the exe from a non-ASCII or OneDrive-synced folder.** On the test machine,
+a binary launched from `C:\Users\<user>\OneDrive\文档\...` could not write to the registry
+at all, while the identical binary copied to an ASCII path worked. That is why `build.ps1`
+outputs to `%LOCALAPPDATA%` by default. Verify with `CtxMenuCleaner.exe --selftest`.
 
 ## Credits and provenance
 
