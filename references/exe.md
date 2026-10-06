@@ -29,7 +29,7 @@ No child process, no JSON hand-off, no PowerShell version dependency.
 ```powershell
 .\src\build.ps1              # build only
 .\src\build.ps1 -Test        # build, then smoke-test --list and --dry-run
-.\src\build.ps1 -OutputDir C:\Tools\CtxMenuCleaner
+.\src\build.ps1 -OutputDir D:\Tools\CtxMenuCleaner
 ```
 
 Output defaults to `%LOCALAPPDATA%\CtxMenuCleaner\CtxMenuCleaner.exe` — see the warning
@@ -59,7 +59,10 @@ wrote to `HKCU` without complaint:
 Symptom: every delete fails with
 `OpenSubKey(writable) ... SecurityException HR=0x8013150A`, and listing still works
 (listing only needs read access). Run `CtxMenuCleaner.exe --selftest` to confirm — it
-prints the identity and whether the process can write to HKCU at all.
+prints the identity and whether the process can write to HKCU at all. That check has one
+side effect, which it states before running: it creates a single throwaway key under
+`HKCU\SOFTWARE\Classes\*\shellex\ContextMenuHandlers` and removes it again. It never
+deletes a real key.
 
 `csc.exe` has the same allergy at build time (it creates a Win32 resource temp file next
 to its output), which is why `build.ps1` stages compilation in an ASCII-only temp
