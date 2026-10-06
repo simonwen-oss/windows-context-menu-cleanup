@@ -5,7 +5,7 @@
 
 [English](./README.en.md) · [更新记录](./CHANGELOG.md) · MIT
 
-**当前版本：v1.1.0。** 包含 PowerShell 工具组，以及一个**可用的原生可执行文件**
+**当前版本：v1.1.1。** 包含 PowerShell 工具组，以及一个**可用的原生可执行文件**
 （`CtxMenuCleaner.exe`，源码在 `src/`，二进制不提交）。详见
 [references/exe.md](./references/exe.md)。
 
