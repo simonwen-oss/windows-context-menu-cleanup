@@ -1,0 +1,38 @@
+{
+  "_comment": "Substring patterns matched (case-insensitively) against each context-menu registry key NAME and its default value. CJK keywords use \\uXXXX escapes so this file stays portable across code pages. Entries marked \"skip\": true are DOCUMENTED but deliberately NOT removed by default - edit the file if you want them gone.",
+  "vendors": [
+    {
+      "vendor": "Sogou Input Method (sogou pinyin)",
+      "note": "Registered under HKLM. Key names are padded with four leading spaces.",
+      "patterns": ["sgshellext", "biz_shell", "\\u641c\\u72d7"]
+    },
+    {
+      "vendor": "Baidu Netdisk",
+      "note": "Registers BOTH a static verb and a COM handler. Both must be removed.",
+      "patterns": ["YunShellExt", "YunShellExplorerCommand", "YunShellCommand", "BaiduNetdisk", "\\u767e\\u5ea6", "\\u7f51\\u76d8"]
+    },
+    {
+      "vendor": "Thunder / Xunlei",
+      "note": "Static verb under HKCU. Avoid the bare word \"Thunder\" - it also matches Windows' own EnhancedStorageShell.",
+      "patterns": ["UploadToThunderPan", "Xunlei", "\\u8baf\\u96f7"]
+    },
+    {
+      "vendor": "360 / Qihoo",
+      "patterns": ["360Shell", "Qihoo", "\\u5947\\u864e", "\\u5b89\\u5168\\u536b\\u58eb"]
+    },
+    {
+      "vendor": "Alibaba Cloud Drive / Quark",
+      "patterns": ["AliyunDrive", "aDriveShellExt", "QuarkShell", "\\u5938\\u514b"]
+    },
+    {
+      "vendor": "Tencent (QQ / WeChat / WeCom)",
+      "patterns": ["QQShellExt", "WeChatShellExt", "WXShell", "\\u5fae\\u4fe1"]
+    },
+    {
+      "vendor": "OneDrive (ships with Windows)",
+      "note": "DOCUMENTED, NOT REMOVED. OneDrive pads its key name with one leading space (\" FileSyncEx\"). Uncomment the patterns to include it.",
+      "skip": true,
+      "patterns": ["FileSyncEx"]
+    }
+  ]
+}
