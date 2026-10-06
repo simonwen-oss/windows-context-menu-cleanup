@@ -81,6 +81,9 @@ under `*`, `Directory`, `Directory\Background`, `Drive` and `lnkfile`.
 ## Pitfalls that cost real time
 
 Full detail in [references/troubleshooting.md](./references/troubleshooting.md).
+A longer and blunter list lives in
+[references/lessons-learned.md](./references/lessons-learned.md) — it includes the
+*wrong* conclusions, which are often more useful to read than the correct ones.
 
 1. **`Registry.OpenBaseKey` does not exist in Windows PowerShell 5.1.** It is a
    .NET Core / PowerShell 7 API. Calling it in 5.1 throws `MethodNotFound` **on the
