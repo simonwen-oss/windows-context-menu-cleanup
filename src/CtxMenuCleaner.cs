@@ -50,7 +50,7 @@ namespace CtxMenuCleaner
     internal static class Program
     {
         private const string Product = "CtxMenuCleaner";
-        private const string Version = "1.0.0";
+        private const string Version = "1.1.1";
 
         private static readonly string[] ClassKeys = new string[]
         {
