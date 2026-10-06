@@ -3,6 +3,30 @@
 All notable changes to this project are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.1] - 2026-10-06
+
+Pre-release audit of the published v1.1.0 content: documentation consistency and a
+security scan. No behaviour change beyond clearer diagnostics.
+
+### Changed
+
+- `--selftest` now states its one side effect before running it: it creates a single
+  throwaway key under `HKCU\SOFTWARE\Classes\*\shellex\ContextMenuHandlers` and removes
+  it again. Its probe key was renamed from `SelfTestProbe` to
+  `CtxMenuCleanerWriteProbe` so it can never be mistaken for a leftover test artefact,
+  and `references/exe.md` documents the side effect.
+- `references/exe.md`: the `-OutputDir` example used a concrete machine path
+  (`C:\Tools\...`); changed to a clearly illustrative `D:\Tools\...`.
+
+### Verified
+
+- Every option listed in the README exists in the source (14 long options), and no
+  documented option is missing from the code.
+- `vendors.json` holds exactly the 7 vendors / 25 patterns the README claims.
+- All four PowerShell tools and every file the READMEs link to are present.
+- Security scan of all 20 published files: no credentials, no personal paths, no
+  temporary or build artefacts, no test leftovers, no host identifiers.
+
 ## [Unreleased]
 
 ### Added
