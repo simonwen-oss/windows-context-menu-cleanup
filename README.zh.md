@@ -357,8 +357,11 @@ Copy-Item . "$env:USERPROFILE\.dsh\skills\windows-context-menu-cleanup" -Recurse
 
 ## 许可证
 
-MIT —— 见 [LICENSE](./LICENSE)。本项目会修改 Windows 注册表；运行前请先审阅脚本和
-备份产物，并先在非关键机器上测试。
+MIT —— 见 [LICENSE](./LICENSE)。
+
+> **注册表风险提示。** 本项目会修改 Windows 注册表：删除第三方软件注册的右键菜单项，
+> 并在删除前为每个键导出 `.reg` 备份。注册表修改存在固有风险——运行前请先审阅脚本与
+> 备份产物，并先在非关键机器上测试。作者不对使用造成的损害承担责任。
 
 ---
 
