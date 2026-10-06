@@ -19,11 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-This project modifies the Windows registry. It deletes the registry keys that
-register third-party Explorer context-menu entries, and exports a backup of each
-key before doing so. Registry edits carry inherent risk: review the script and
-the backup output before running it, and test on a non-critical machine first.
-The authors take no responsibility for any damage resulting from its use.
