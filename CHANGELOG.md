@@ -3,6 +3,20 @@
 All notable changes to this project are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.2] - 2026-10-06
+
+Documentation only. No code change: the executable and scripts are identical to v1.1.1.
+
+### Added
+
+- `references/lessons-learned.md` — the mistakes made while building this project, grouped
+  into **wrong conclusions** (reporting a deletion that deleted nothing, blaming a
+  failure on Chinese comments, three successive incorrect root causes for one interactive
+  symptom), **technical bugs** (the `OpenBaseKey` trap, `\s` escaping, `ConvertFrom-Json`
+  and `ConvertTo-Json` behaviour on 5.1, a licence file that broke MIT detection, an
+  HTTP 400 on large request bodies), and **omissions and process mistakes**. Linked from
+  both READMEs and from `SKILL.md`.
+
 ## [1.1.1] - 2026-10-06
 
 Pre-release audit of the published content: documentation consistency, a security scan,
