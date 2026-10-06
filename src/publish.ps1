@@ -171,7 +171,8 @@ if (-not $tagExists) {
     Write-Host "  tag $Tag already exists" -ForegroundColor Yellow
 }
 
-$notesFile = Join-Path $root 'release-notes.md'
+# The notes live next to this script (src/), not at the repository root.
+$notesFile = Join-Path $PSScriptRoot 'release-notes.md'
 if (-not (Test-Path -LiteralPath $notesFile)) { throw "release notes not found: $notesFile" }
 $notes = [System.IO.File]::ReadAllText($notesFile)
 
