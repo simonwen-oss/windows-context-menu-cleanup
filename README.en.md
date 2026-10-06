@@ -6,7 +6,7 @@ verification and a working rollback path.
 
 [中文说明](./README.md) · [Changelog](./CHANGELOG.md) · MIT
 
-**Current release: v1.1.0.** PowerShell tooling plus a **working native executable**
+**Current release: v1.1.1.** PowerShell tooling plus a **working native executable**
 (`CtxMenuCleaner.exe`; source under `src/`, the binary is not committed). See
 [references/exe.md](./references/exe.md).
 
