@@ -5,9 +5,9 @@
 
 [English](./README.en.md) · [更新记录](./CHANGELOG.md) · MIT
 
-**当前版本：v1.0.0 —— 仅 PowerShell 版。** 编译版可执行文件
-（`CtxMenuCleaner.exe`）正在 `src/` 下开发，**不属于本版本**，详见
-[后续规划](#后续规划)。
+**当前版本：v1.1.0。** 包含 PowerShell 工具组，以及一个**可用的原生可执行文件**
+（`CtxMenuCleaner.exe`，源码在 `src/`，二进制不提交）。详见
+[references/exe.md](./references/exe.md)。
 
 ---
 
@@ -342,20 +342,67 @@ Copy-Item . "$env:USERPROFILE\.dsh\skills\windows-context-menu-cleanup" -Recurse
 
 ## 后续规划
 
-- **v1.0.0（本版本）** —— PowerShell 工具，不含编译产物。
-- **v2（已可用，未发布）** —— `CtxMenuCleaner.exe`，用 Windows 自带的 C# 编译器编译的
-  原生程序。它通过 `RegistryKey.OpenBaseKey` 在**单个进程**内读取两套注册表视图
-  （PowerShell 5.1 做不到），因此**完全不依赖 PowerShell 版本**。源码与构建脚本在
-  `src/`，二进制不提交。详见 [references/exe.md](./references/exe.md)。
+- **v1.0.0** —— PowerShell 工具，不含编译产物。
+- **v1.1.0（本版本）** —— 新增可用的原生 `CtxMenuCleaner.exe`、`src/publish.ps1` 发布工具，
+  并修掉一批 exe 缺陷（详见 [更新记录](./CHANGELOG.md)）。
+- **后续** —— 交互模式的输入时序在部分终端仍可能被前一个提示吞掉，建议优先用
+  `--select N --yes`（见 [references/exe.md](./references/exe.md)）。
 
-  ```powershell
-  .\src\build.ps1 -Test        # 构建到 %LOCALAPPDATA%\CtxMenuCleaner\
-  ```
+## 原生可执行文件 CtxMenuCleaner.exe
 
-  ⚠️ **切勿从含非 ASCII 字符或 OneDrive 同步的目录运行该 exe。** 在测试机上，从
-  `C:\Users\<用户>\OneDrive\文档\...` 启动的二进制**完全无法写注册表**，而同一份二进制
-  复制到 ASCII 路径后正常。这就是构建产物默认输出到 `%LOCALAPPDATA%` 的原因。可用
-  `CtxMenuCleaner.exe --selftest` 自查。
+用 Windows 自带的 C# 编译器编译，**单文件、无依赖、不需要 PowerShell**。它通过
+`RegistryKey.OpenBaseKey` 在**单个进程**内读取两套注册表视图——这是 PowerShell 5.1
+做不到的，因此它彻底摆脱了 PowerShell 版本问题。
+
+完整说明见 [references/exe.md](./references/exe.md)，这里给最常用的部分：
+
+```powershell
+# 构建（输出到 %LOCALAPPDATA%\CtxMenuCleaner\，刻意避开非 ASCII 路径）
+.\src\build.ps1 -Test
+
+$ctx = "$env:LOCALAPPDATA\CtxMenuCleaner\CtxMenuCleaner.exe"
+
+# 查看清单（不需要管理员，不删任何东西）
+& $ctx --list
+
+# 试运行（不删）
+& $ctx --select 4 --dry-run
+
+# 删除（--yes 跳过确认，因此完全不读键盘 —— 推荐）
+& $ctx --select 4 --yes
+
+# 交互式：它会先列清单，等你在 Selection: 处输入编号，
+# 然后要求你在 Type YES to confirm: 处输入大写的 YES 才真正删除。
+& $ctx
+```
+
+> **交互模式有一个容易踩的点**：输入编号之后，程序会停下来要求你输入 **`YES`**
+> （三个大写字母）才会真正删除；输入其它任何内容（包括直接回车）都只是取消。
+> 想跳过这一步就用 `--yes`。
+
+**常用参数**
+
+| 参数 | 含义 |
+|---|---|
+| `--list` | 只列清单 |
+| `--all` | 连 Windows 内置项一起列出 |
+| `--select N[,M...]` | 直接指定编号删除 |
+| `--dry-run` | 只显示将要做什么，不删除 |
+| `--yes` | 跳过 `Type YES` 确认 |
+| `--grid` | 用可搜索的勾选窗口挑选 |
+| `--auto-elevate` | 非管理员时直接提权，不询问 `[Y/n]` |
+| `--no-restart` | 不重启 explorer |
+| `--no-backup` | 不导出 `.reg` 备份（不推荐） |
+| `--backup-dir D` | 备份目录 |
+| `--selftest` | 报告本进程能否写 HKCU（诊断路径问题） |
+| `--stdin-info` | 报告 stdin 是否为真实终端（诊断交互问题） |
+| `--log <文件>` | 记录每次提示读到了什么（诊断交互问题） |
+| `--keep-open` | 退出前等待回车，避免窗口一闪而过 |
+
+⚠️ **切勿从含非 ASCII 字符或 OneDrive 同步的目录运行该 exe。** 在测试机上，从
+`C:\Users\<用户>\OneDrive\文档\...` 启动的二进制**完全无法写注册表**，而同一份二进制
+复制到 ASCII 路径后正常。`build.ps1` 因此把产物默认输出到 `%LOCALAPPDATA%`；可用
+`CtxMenuCleaner.exe --selftest` 自行确认。
 
 ## 来源与致谢
 
