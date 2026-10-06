@@ -67,6 +67,27 @@ namespace CtxMenuCleaner
 
         private static int Main()
         {
+            // --keep-open has to hold the window on EVERY exit path (a cancelled prompt, an
+            // unresolved selection, a crash), not just on the success path, so wrap the whole
+            // body and pause in finally.
+            try
+            {
+                return Run();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine();
+                Console.WriteLine("UNEXPECTED ERROR: " + ex.GetType().Name + ": " + ex.Message);
+                return 1;
+            }
+            finally
+            {
+                PauseIfRequested(Has(Environment.GetCommandLineArgs(), "--keep-open"));
+            }
+        }
+
+        private static int Run()
+        {
             try { Console.OutputEncoding = Encoding.UTF8; }
             catch { /* console may not support it; not fatal */ }
 
@@ -80,6 +101,9 @@ namespace CtxMenuCleaner
             bool noBackup = Has(args, "--no-backup");
             bool showWindows = Has(args, "--all");
             bool forceWrite = Has(args, "--force-write");
+            bool keepOpen = Has(args, "--keep-open");
+            bool autoElevate = Has(args, "--auto-elevate");
+            _logPath = Value(args, "--log");
             string backupDir = Value(args, "--backup-dir");
             string select = Value(args, "--select");
             string runAs = Value(args, "--runas");
@@ -96,20 +120,38 @@ namespace CtxMenuCleaner
                 return 0;
             }
 
-            // --runas <args>: re-launch elevated and forward <args>. The literal token
-            // "exec" means "arguments arrive below", which is not the case; treat any
-            // caller that only passed the marker as a request to rebuild from argv.
+            if (Has(args, "--selftest"))
+            {
+                return SelfTest();
+            }
+
+            if (Has(args, "--stdin-info"))
+            {
+                // Diagnose "the prompt answered itself / exited immediately" reports.
+                Console.WriteLine("Console.IsInputRedirected  : " + Console.IsInputRedirected);
+                Console.WriteLine("Console.IsOutputRedirected : " + Console.IsOutputRedirected);
+                Console.WriteLine("stdin is a console (TTY)   : " + (SafeIsTerminal() ? "yes" : "no"));
+                Console.WriteLine("stdin type                 : " + DescribeStdin());
+                string probe = Console.ReadLine();
+                Console.WriteLine("first ReadLine() returned  : " + (probe == null ? "(null - no input available)" : "[" + probe + "]"));
+                return 0;
+            }
+
+            // --runas <args>: re-launch elevated with exactly <args> and wait.
             if (runAs != null)
             {
                 if (string.Equals(runAs, "exec", StringComparison.OrdinalIgnoreCase))
                 {
-                    return RelaunchElevated(RebuildArgs(args, select, grid), args);
+                    return RelaunchElevated(BuildElevatedArgs(args, select, grid), args, keepOpen, false);
                 }
-                return RelaunchElevated(runAs, args);
+                return RelaunchElevated(runAs, args, keepOpen, false);
             }
 
             bool elevated = IsElevated();
             Header(elevated);
+            Log("=== start === elevated=" + elevated + " forceWrite=" + forceWrite +
+                " dryRun=" + dryRun + " yes=" + yes + " listOnly=" + listOnly +
+                " grid=" + grid + " select=" + Quote(select) + " keepOpen=" + keepOpen);
 
             List<Entry> entries = Collect();
             List<Group> groups = Group2(entries);
@@ -120,45 +162,123 @@ namespace CtxMenuCleaner
             Console.WriteLine("Found " + groups.Count + " component(s): " +
                               thirdCount + " third-party, " + windowsCount + " Windows built-in.");
 
+            // Assign the slot numbers ONCE, here. Both the listing and every selection
+            // path share this map, so --select N, the interactive prompt and the elevated
+            // child all agree on what "N" means.
+            Dictionary<int, Group> indexToGroup = NumberGroups(groups);
+
             if (listOnly)
             {
-                Print(groups, showWindows);
+                Print(groups, showWindows, indexToGroup);
                 return 0;
             }
 
+            // --- elevation, decided ONCE and BEFORE any selection ------------------
+            // Asking for elevation after the user has already answered a prompt is how a run
+            // ends in "Aborted." and looks like "my input did nothing" (a [y/N] prompt
+            // defaults to N). Ask first instead; --yes or --force-write skip the question.
+            bool needElevation = !elevated && !forceWrite && !dryRun;
+            if (needElevation && autoElevate && !yes)
+            {
+                // --auto-elevate: never ask, just re-launch. Removes the prompt that can eat a
+                // typed answer in a terminal whose input timing is awkward.
+                Log("auto-elevating without asking");
+                string autoArgs = BuildElevatedArgs(args, sel: select, grid: grid);
+                if (!Has(args, "--keep-open")) autoArgs += " --keep-open";
+                return RelaunchElevated(autoArgs, args, keepOpen, true);
+            }
+            if (needElevation && !yes && !autoElevate)
+            {
+                Console.WriteLine();
+                Console.WriteLine("Elevation is required to remove keys under HKLM.");
+                if (!string.IsNullOrEmpty(select))
+                {
+                    Console.WriteLine("Your selection (" + select + ") is kept - it will be applied after re-launching,");
+                    Console.WriteLine("so you will NOT have to type it again.");
+                }
+                else
+                {
+                    Console.WriteLine("The elevated window will show the same list and ask for your selection.");
+                }
+                string e0 = ReadLineLogged("Re-launch elevated now? [Y/n] ");
+                if (e0 == null) { NoInteractiveInput(); return 1; }
+                string e0t = e0.Trim();
+                if (e0t.Length == 0 || e0t.StartsWith("y", StringComparison.OrdinalIgnoreCase))
+                {
+                    string upArgs = BuildElevatedArgs(args, sel: select, grid: grid);
+                    if (!Has(args, "--keep-open")) upArgs += " --keep-open";
+                    return RelaunchElevated(upArgs, args, keepOpen, true);
+                }
+                Console.WriteLine();
+                Console.WriteLine("Continuing WITHOUT elevation - listing only; removal cannot work.");
+            }
+
             List<Group> chosen;
+            List<int> groupsPicked = new List<int>();
 
             if (grid)
             {
                 chosen = PickGrid(groups);
                 if (chosen == null || chosen.Count == 0) { Console.WriteLine("Nothing selected."); return 0; }
+                foreach (int k in indexToGroup.Keys)
+                {
+                    if (chosen.Contains(indexToGroup[k])) groupsPicked.Add(k);
+                }
             }
             else if (select != null)
             {
-                chosen = PickByNumbers(groups, select);
-                if (chosen.Count == 0) { Console.WriteLine("Nothing selected."); return 0; }
+                chosen = PickByNumbers(select, indexToGroup, groupsPicked);
+                if (chosen.Count == 0)
+                {
+                    Console.WriteLine();
+                    Console.WriteLine("ERROR: --select " + Quote(select) + " matched no component.");
+                    Console.WriteLine("       Run --list first to see the valid numbers.");
+                    return 1;
+                }
             }
             else
             {
-                Print(groups, showWindows);
+                Print(groups, showWindows, indexToGroup);
                 Console.WriteLine();
                 Console.WriteLine("Enter the numbers to DELETE, separated by spaces or commas.");
-                Console.WriteLine("  e.g.  1 4 7    or  2,3        (empty = cancel, 'w' = show Windows built-ins)");
-                Console.Write("Selection: ");
-                string answer = Console.ReadLine();
-                if (answer != null && answer.Trim().Equals("w", StringComparison.OrdinalIgnoreCase))
+                Console.WriteLine("  e.g.  1 4 7    or  2,3        (empty line = cancel, 'w' = show Windows built-ins)");
+                Log("about to prompt for selection; groups=" + groups.Count +
+                    " numbered=" + indexToGroup.Count + " elevated=" + elevated);
+                string answer = ReadLineLogged("Selection: ");
+                if (answer == null)
                 {
-                    Print(groups, true);
-                    Console.Write("Selection: ");
-                    answer = Console.ReadLine();
+                    // null means there is NO readable stdin (redirected or detached), which is
+                    // not the same as the user pressing Enter - that would be "". Bail out
+                    // loudly instead of pretending the user cancelled.
+                    NoInteractiveInput();
+                    return 1;
                 }
-                if (string.IsNullOrEmpty(answer) || answer.Trim().Length == 0)
+                if (answer.Trim().Equals("w", StringComparison.OrdinalIgnoreCase))
+                {
+                    Print(groups, true, indexToGroup);
+                    answer = ReadLineLogged("Selection: ");
+                    if (answer == null) { NoInteractiveInput(); return 1; }
+                }
+                Log("answer=" + Quote(answer) + " trimmed=" + Quote(answer.Trim()));
+                if (answer.Trim().Length == 0)
                 {
                     Console.WriteLine("Cancelled.");
                     return 0;
                 }
-                chosen = PickByNumbers(groups, answer);
-                if (chosen.Count == 0) { Console.WriteLine("Nothing selected."); return 0; }
+                chosen = PickByNumbers(answer, indexToGroup, groupsPicked);
+                Log("parsed groups=" + chosen.Count + " numbers=" + JoinNumbers(groupsPicked));
+                if (chosen.Count == 0)
+                {
+                    // Never let an unparsable answer look like a quiet cancel. This also
+                    // catches a paste that raced ahead of the prompt and got eaten here.
+                    Console.WriteLine();
+                    Console.WriteLine("ERROR: no valid number was found in that answer.");
+                    Console.WriteLine("       Input was: " + Quote(answer));
+                    Console.WriteLine("       Expected numbers, e.g.  1 4 7  or  2,3  (empty line cancels).");
+                    Console.WriteLine("       Nothing was changed.");
+                    NoInteractiveInputHint();
+                    return 1;
+                }
             }
 
             List<Entry> victims = new List<Entry>();
@@ -185,24 +305,27 @@ namespace CtxMenuCleaner
 
             if (!elevated && !forceWrite)
             {
+                // Should be unreachable: elevation was decided before the selection, or --yes
+                // was given. Kept as a guard so a future edit cannot silently skip it.
                 Console.WriteLine();
-                Console.WriteLine("Administrator rights are required (HKLM keys cannot be removed otherwise).");
-                Console.WriteLine("Will run: " + SelfPath() + " " + RebuildArgs(args, select, grid));
-                Console.Write("Re-launch elevated now? [y/N]: ");
-                string a = Console.ReadLine();
-                if (a != null && a.Trim().StartsWith("y", StringComparison.OrdinalIgnoreCase))
-                {
-                    return RelaunchElevated(RebuildArgs(args, select, grid), args);
-                }
-                Console.WriteLine("Aborted.");
+                Console.WriteLine("ERROR: not elevated and the early elevation step did not run.");
+                Console.WriteLine("       Re-run with --yes, or from an elevated prompt.");
                 return 1;
             }
 
             if (!yes)
             {
-                Console.Write("Type YES to confirm: ");
-                string c = Console.ReadLine();
-                if (c == null || c.Trim() != "YES") { Console.WriteLine("Aborted."); return 0; }
+                Console.WriteLine();
+                Console.WriteLine(">>> Type YES (three letters, upper case) and press Enter to actually delete.");
+                Console.WriteLine(">>> Anything else - including just Enter - cancels. Nothing has been changed yet.");
+                string c = ReadLineLogged("Type YES to confirm: ");
+                if (c == null) { NoInteractiveInput(); return 1; }
+                if (c.Trim() != "YES")
+                {
+                    Console.WriteLine("Not confirmed (you typed " + Quote(c.Trim()) + ") - nothing was changed.");
+                    Console.WriteLine("To skip this confirmation entirely, add --yes to the command line.");
+                    return 0;
+                }
             }
 
             if (backupDir == null || backupDir.Length == 0)
@@ -216,7 +339,6 @@ namespace CtxMenuCleaner
             {
                 Console.WriteLine();
                 Console.WriteLine("Deleting " + e.Hive + "\\" + e.Rel + "\\" + e.RealName);
-                Console.WriteLine("        view " + e.View + "-bit   raw: " + e.RawKey + "   shape=" + e.Shape + "   target=" + (e.Target == null ? "(none)" : e.Target));
                 if (!noBackup)
                 {
                     string file = Export(e, backupDir);
@@ -246,7 +368,201 @@ namespace CtxMenuCleaner
                 RestartExplorer();
             }
 
+            PauseIfRequested(false);   // the real pause happens in Main's finally
             return bad == 0 ? 0 : 2;
+        }
+
+        // An elevated child gets its own console window, which would vanish before the user
+        // could read it. --keep-open (added automatically when we spawn such a window) holds
+        // it until Enter.
+        private static void PauseIfRequested(bool keepOpen)
+        {
+            if (!keepOpen) return;
+            Console.WriteLine();
+            Console.Write("Press Enter to close this window...");
+            try { Console.ReadLine(); } catch { }
+        }
+
+        // Distinguish "no stdin available" from "the user pressed Enter". Silently treating
+        // the former as a cancel is what made an interactive run look like it exited by
+        // itself while the typed characters stayed in the keyboard buffer.
+        private static void NoInteractiveInput()
+        {
+            Console.WriteLine();
+            Console.WriteLine("ERROR: no interactive input is available (stdin is redirected or detached).");
+            Console.WriteLine("       Your keystrokes did NOT reach this program.");
+            NoInteractiveInputHint();
+        }
+
+        private static void NoInteractiveInputHint()
+        {
+            Console.WriteLine("       Use a non-interactive selection instead, for example:");
+            Console.WriteLine("         CtxMenuCleaner.exe --list");
+            Console.WriteLine("         CtxMenuCleaner.exe --select 4 --dry-run");
+            Console.WriteLine("         CtxMenuCleaner.exe --select 4 --yes");
+            Console.WriteLine("       Run --stdin-info to see what this process sees on stdin.");
+        }
+
+        private static string Quote(string s)
+        {
+            if (s == null) return "(null)";
+            if (s.Length > 120) s = s.Substring(0, 120) + "...";
+            return "\"" + s + "\"";
+        }
+
+        // ------------------------------------------------- interactive tracing
+
+        private static string _logPath;
+
+        // Appends a timestamped line to the --log file. Never throws: tracing must not be
+        // able to break the run it is trying to explain.
+        private static void Log(string message)
+        {
+            if (string.IsNullOrEmpty(_logPath)) return;
+            try
+            {
+                File.AppendAllText(_logPath,
+                    DateTime.Now.ToString("HH:mm:ss.fff") + "  " + message + Environment.NewLine);
+            }
+            catch { }
+        }
+
+        // Prompt + read in one place, recording exactly what ReadLine returned and what the
+        // console looked like at that moment. This is the only way to see the interactive
+        // path from an environment whose stdin is redirected.
+        private static string ReadLineLogged(string prompt)
+        {
+            bool terminal = SafeIsTerminal();
+            Console.Write(prompt);
+            string v = Console.ReadLine();
+            Log(prompt.Trim() + " -> " + Quote(v) +
+                "   [stdinTerminal=" + terminal +
+                " inputRedirected=" + Console.IsInputRedirected +
+                " outputRedirected=" + Console.IsOutputRedirected + "]");
+            return v;
+        }
+
+        // ------------------------------------------------------------ diagnostics
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr GetStdHandle(int nStdHandle);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool GetConsoleMode(IntPtr hConsoleHandle, out uint lpMode);
+
+        private static bool SafeIsTerminal()
+        {
+            try
+            {
+                IntPtr h = GetStdHandle(-10);   // STD_INPUT_HANDLE
+                if (h == IntPtr.Zero || h == new IntPtr(-1)) return false;
+                uint mode;
+                return GetConsoleMode(h, out mode);
+            }
+            catch { return false; }
+        }
+
+        private static string DescribeStdin()
+        {
+            try
+            {
+                IntPtr h = GetStdHandle(-10);
+                if (h == IntPtr.Zero) return "invalid handle";
+                if (h == new IntPtr(-1)) return "no stdin handle";
+                return "handle 0x" + h.ToInt64().ToString("X");
+            }
+            catch (Exception ex) { return "error: " + ex.Message; }
+        }
+
+        // Diagnostic: can this process write to the registry at all? Used to distinguish
+        // "our logic picked the wrong view" from "this process token cannot write".
+        private static int SelfTest()
+        {
+            Console.WriteLine("=== identity ===");
+            try
+            {
+                WindowsIdentity id = WindowsIdentity.GetCurrent();
+                Console.WriteLine("  Name      : " + id.Name);
+                Console.WriteLine("  Token     : " + id.Token);
+                Console.WriteLine("  IsSystem  : " + id.IsSystem);
+                WindowsPrincipal p = new WindowsPrincipal(id);
+                Console.WriteLine("  Admin     : " + p.IsInRole(WindowsBuiltInRole.Administrator));
+            }
+            catch (Exception ex) { Console.WriteLine("  identity failed: " + ex.Message); }
+
+            Console.WriteLine();
+            Console.WriteLine("=== process ===");
+            Console.WriteLine("  64-bit    : " + (IntPtr.Size == 8));
+
+            string rel = "*\\shellex\\ContextMenuHandlers";
+            string name = "    SelfTestProbe";
+            string full = "SOFTWARE\\Classes\\" + rel + "\\" + name;
+
+            foreach (string view in new string[] { "64", "32" })
+            {
+                Console.WriteLine();
+                Console.WriteLine("=== view " + view + " ===");
+                RegistryKey bk = null;
+                try { bk = Base("HKCU", view); }
+                catch (Exception ex) { Console.WriteLine("  OpenBaseKey failed: " + ex.Message); continue; }
+
+                // 1. create a throwaway key
+                try
+                {
+                    using (RegistryKey c = bk.CreateSubKey("SOFTWARE\\Classes\\" + rel))
+                    using (RegistryKey k = c.CreateSubKey(name)) { }
+                    Console.WriteLine("  create            : OK");
+                }
+                catch (Exception ex) { Console.WriteLine("  create            : " + ex.GetType().Name + " " + ex.Message); }
+
+                // 2. writable open of the throwaway key
+                try
+                {
+                    using (RegistryKey x = bk.OpenSubKey(full, true))
+                    {
+                        Console.WriteLine("  OpenSubKey(true)  : " + (x == null ? "NULL" : "OK"));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("  OpenSubKey(true)  : " + ex.GetType().Name +
+                                      " HR=0x" + ex.HResult.ToString("X8") + " " + ex.Message);
+                }
+
+                // 3. writable open of an unrelated user key for comparison
+                try
+                {
+                    using (RegistryKey x = bk.OpenSubKey("SOFTWARE\\Classes\\*", true))
+                    {
+                        Console.WriteLine("  * writable        : " + (x == null ? "NULL" : "OK"));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("  * writable        : " + ex.GetType().Name +
+                                      " HR=0x" + ex.HResult.ToString("X8") + " " + ex.Message);
+                }
+
+                // 4. clean up
+                try
+                {
+                    using (RegistryKey c = bk.OpenSubKey("SOFTWARE\\Classes\\" + rel, true))
+                    {
+                        if (c != null) { c.DeleteSubKeyTree(name, false); Console.WriteLine("  cleanup           : OK"); }
+                    }
+                }
+                catch (Exception ex) { Console.WriteLine("  cleanup           : " + ex.Message); }
+
+                bk.Close();
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("=== RegistryView enum values ===");
+            Console.WriteLine("  Registry64 = 0x" + ((int)RegistryView.Registry64).ToString("X4"));
+            Console.WriteLine("  Registry32 = 0x" + ((int)RegistryView.Registry32).ToString("X4"));
+            Console.WriteLine("  RegistryHive.CurrentUser = 0x" + ((int)RegistryHive.CurrentUser).ToString("X8"));
+            Console.WriteLine("  RegistryHive.LocalMachine = 0x" + ((int)RegistryHive.LocalMachine).ToString("X8"));
+            return 0;
         }
 
         // ------------------------------------------------------------ registry
@@ -260,6 +576,7 @@ namespace CtxMenuCleaner
 
         private static List<Entry> Collect()
         {
+            bool trace = Environment.GetEnvironmentVariable("CTXMENU_TRACE") == "1";
             List<Entry> all = new List<Entry>();
             string[] hives = new string[] { "HKCU", "HKLM" };
             string[] views = new string[] { "64", "32" };
@@ -281,18 +598,27 @@ namespace CtxMenuCleaner
                             RegistryKey container = null;
                             try { container = baseKey.OpenSubKey("SOFTWARE\\Classes\\" + rel); }
                             catch { }
-                            if (container == null) continue;
+                            if (container == null)
+                            {
+                                if (trace) Console.WriteLine("[trace] " + hive + "/" + view + " " + rel + ": container NULL");
+                                continue;
+                            }
 
                             string[] names;
                             try { names = container.GetSubKeyNames(); }
                             catch { container.Close(); continue; }
+                            if (trace) Console.WriteLine("[trace] " + hive + "/" + view + " " + rel + ": " + names.Length + " subkeys");
 
                             foreach (string real in names)
                             {
                                 RegistryKey child = null;
                                 try { child = container.OpenSubKey(real); }
                                 catch { }
-                                if (child == null) continue;
+                                if (child == null)
+                                {
+                                    if (trace) Console.WriteLine("[trace]   child NULL for [" + real + "]");
+                                    continue;
+                                }
 
                                 Entry e = new Entry();
                                 e.Hive = hive;
@@ -372,7 +698,16 @@ namespace CtxMenuCleaner
                 k.Close();
                 return true;
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                // Silent on purpose: for HKLM keys without elevation this is expected on
+                // every single entry, and printing it would bury the real output. Use
+                // CTXMENU_TRACE=1 when diagnosing why a writable view was not chosen.
+                if (Environment.GetEnvironmentVariable("CTXMENU_TRACE") == "1")
+                    Console.WriteLine("[trace]   IsWritable(" + sub + ") -> " + ex.GetType().Name +
+                                      " HR=0x" + ex.HResult.ToString("X8") + " " + ex.Message);
+                return false;
+            }
         }
 
         // Collapse entries that denote the same underlying key, preferring writable ones.
@@ -402,13 +737,25 @@ namespace CtxMenuCleaner
             error = null;
             RegistryKey baseKey;
             try { baseKey = Base(e.Hive, e.View); }
-            catch (Exception ex) { error = ex.Message; return false; }
+            catch (Exception ex) { error = "OpenBaseKey: " + ex.Message; return false; }
 
             string sub = "SOFTWARE\\Classes\\" + e.Rel;
             RegistryKey container = null;
             try { container = baseKey.OpenSubKey(sub, true); }
-            catch (Exception ex) { error = ex.Message; baseKey.Close(); return false; }
-            if (container == null) { error = "container not found"; baseKey.Close(); return false; }
+            catch (Exception ex)
+            {
+                error = "OpenSubKey(writable) on " + sub + ": " + ex.GetType().Name +
+                        " HR=0x" + ex.HResult.ToString("X8") + " " + ex.Message;
+                baseKey.Close();
+                return false;
+            }
+            if (container == null)
+            {
+                error = "container not found or not writable: " + e.Hive + "\\" + sub +
+                        " (view " + e.View + ", writable-probe=" + e.Writable + ")";
+                baseKey.Close();
+                return false;
+            }
 
             try
             {
@@ -416,7 +763,8 @@ namespace CtxMenuCleaner
             }
             catch (Exception ex)
             {
-                error = ex.Message;
+                error = "DeleteSubKeyTree on [" + e.RealName + "]: " + ex.GetType().Name +
+                        " HR=0x" + ex.HResult.ToString("X8") + " " + ex.Message;
                 container.Close();
                 baseKey.Close();
                 return false;
@@ -637,6 +985,16 @@ namespace CtxMenuCleaner
             Console.WriteLine("  --backup-dir D   where to write backups");
             Console.WriteLine("  --no-restart     do not restart Explorer afterwards");
             Console.WriteLine("  --show-elevate   show the elevated command instead of running it");
+            Console.WriteLine("  --selftest       report the process identity and whether it can write");
+            Console.WriteLine("                   to HKCU at all, then exit (diagnostic)");
+            Console.WriteLine("  --keep-open      wait for Enter before exiting (for windows that would");
+            Console.WriteLine("                   otherwise close; added automatically when self-elevating)");
+            Console.WriteLine("  --stdin-info     report whether stdin can actually be read, then exit");
+            Console.WriteLine("                   (use when the interactive prompt seems to answer itself)");
+            Console.WriteLine("  --auto-elevate   re-launch elevated without asking (avoids a prompt that");
+            Console.WriteLine("                   can consume a typed answer on some terminals)");
+            Console.WriteLine("  --log <file>     append a trace of prompts and answers to <file>");
+            Console.WriteLine("  --force-write    skip the elevation guard; HKLM will still fail");
             Console.WriteLine("  --version        print the version");
             Console.WriteLine("  --help           this text");
             Console.WriteLine();
@@ -645,22 +1003,41 @@ namespace CtxMenuCleaner
             Console.WriteLine("target them deliberately.");
         }
 
-        private static void Print(List<Group> groups, bool showWindows)
+        // Assign slot numbers once. Third-party components come first so that "1" is the
+        // first thing a user wants to act on; Windows built-ins are numbered after them so
+        // an explicit number can still reach one.
+        private static Dictionary<int, Group> NumberGroups(List<Group> groups)
         {
+            Dictionary<int, Group> map = new Dictionary<int, Group>();
             int index = 0;
+            foreach (Group g in groups) { if (!g.Windows) { index++; map[index] = g; g.Key = index.ToString(); } }
+            foreach (Group g in groups) { if (g.Windows) { index++; map[index] = g; g.Key = index.ToString(); } }
+            return map;
+        }
+
+        private static string JoinNumbers(List<int> numbers)
+        {
+            List<string> parts = new List<string>();
+            numbers.Sort();
+            foreach (int n in numbers) parts.Add(n.ToString());
+            return string.Join(",", parts.ToArray());
+        }
+
+        private static void Print(List<Group> groups, bool showWindows, Dictionary<int, Group> indexToGroup)
+        {
             Console.WriteLine();
             if (showWindows)
             {
                 Console.WriteLine("=== Windows built-ins (NOT selected unless you name them) ===");
             }
 
+            int shown = 0;
             foreach (Group g in groups)
             {
                 if (g.Windows && !showWindows) continue;
-                index++;
-                g.Key = index.ToString();
+                shown++;
                 string tag = g.Windows ? " (built-in)" : "";
-                Console.WriteLine("  [" + index.ToString().PadLeft(3) + "] " + g.Label +
+                Console.WriteLine("  [" + g.Key.PadLeft(3) + "] " + g.Label +
                                   "   (" + g.Entries.Count + " registration(s))" + tag);
                 if (g.Detail != null) Console.WriteLine("        " + g.Detail);
                 foreach (Entry e in g.Entries)
@@ -672,37 +1049,18 @@ namespace CtxMenuCleaner
                 }
             }
             Console.WriteLine();
-            if (showWindows)
-            {
-                Console.WriteLine("(" + index + " slot(s) listed; Windows built-ins included.)");
-            }
-            else
-            {
-                Console.WriteLine("(" + index + " slot(s) listed. Windows built-ins are hidden unless --all is used.)");
-            }
+            Console.WriteLine("(" + shown + " slot(s) shown of " + indexToGroup.Count + " total. " +
+                              (showWindows
+                                  ? "Windows built-ins included.)"
+                                  : "Windows built-ins are numbered too but not shown; --all shows them.)"));
         }
 
-        private static List<Group> PickByNumbers(List<Group> groups, string spec)
+        // Resolve a selection spec against the shared numbering. Valid numbers are recorded
+        // in pickedNumbers so an elevated re-launch can replay exactly the same selection.
+        private static List<Group> PickByNumbers(string spec,
+                                                 Dictionary<int, Group> indexToGroup,
+                                                 List<int> pickedNumbers)
         {
-            // Re-index exactly like Print() does.
-            int index = 0;
-            Dictionary<int, Group> byNum = new Dictionary<int, Group>();
-            foreach (Group g in groups)
-            {
-                // only third-party groups are numbered unless the user asked for --all
-                if (g.Windows) continue;
-                index++;
-                byNum[index] = g;
-            }
-            // number the Windows groups after the third-party ones so an explicit
-            // number can still reach them once --all was printed
-            foreach (Group g in groups)
-            {
-                if (!g.Windows) continue;
-                index++;
-                byNum[index] = g;
-            }
-
             List<Group> picked = new List<Group>();
             string[] parts = spec.Split(new char[] { ',', ';', ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
             foreach (string p in parts)
@@ -714,8 +1072,15 @@ namespace CtxMenuCleaner
                     continue;
                 }
                 Group g;
-                if (byNum.TryGetValue(n, out g)) picked.Add(g);
-                else Console.WriteLine("Ignoring out-of-range selection: " + n);
+                if (indexToGroup.TryGetValue(n, out g))
+                {
+                    if (!picked.Contains(g)) picked.Add(g);
+                    if (!pickedNumbers.Contains(n)) pickedNumbers.Add(n);
+                }
+                else
+                {
+                    Console.WriteLine("Ignoring out-of-range selection: " + n);
+                }
             }
             return picked;
         }
@@ -800,7 +1165,8 @@ namespace CtxMenuCleaner
             catch { return false; }
         }
 
-        private static int RelaunchElevated(string argumentString, string[] originalArgs)
+        private static int RelaunchElevated(string argumentString, string[] originalArgs,
+                                            bool keepOpen, bool explainTwoWindows)
         {
             if (Has(originalArgs, "--show-elevate"))
             {
@@ -817,6 +1183,12 @@ namespace CtxMenuCleaner
                 psi.Arguments = argumentString;
                 psi.UseShellExecute = true;
                 psi.Verb = "runas";
+                if (explainTwoWindows)
+                {
+                    Console.WriteLine();
+                    Console.WriteLine("Waiting for the elevated window to finish. Approve the UAC prompt,");
+                    Console.WriteLine("then read and close that window to return here.");
+                }
                 Process p = Process.Start(psi);
                 p.WaitForExit();
                 return p.ExitCode;
@@ -841,11 +1213,14 @@ namespace CtxMenuCleaner
             return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, Product + ".exe");
         }
 
-        private static string RebuildArgs(string[] args, string select, bool grid)
+        // Build the command line for the elevated instance. `sel` carries the chosen slot
+        // numbers so the child does not have to ask again; `keepOpen` makes the child wait
+        // for Enter in its own window, otherwise the window closes before it can be read.
+        private static string BuildElevatedArgs(string[] args, string sel, bool grid)
         {
             StringBuilder sb = new StringBuilder();
             if (grid) sb.Append("--grid");
-            else if (select != null) sb.Append("--select ").Append(select);
+            else if (!string.IsNullOrEmpty(sel)) sb.Append("--select ").Append(sel);
             if (Has(args, "--yes")) sb.Append(" --yes");
             if (Has(args, "--no-restart")) sb.Append(" --no-restart");
             if (Has(args, "--dry-run")) sb.Append(" --dry-run");
@@ -853,6 +1228,7 @@ namespace CtxMenuCleaner
             if (Has(args, "--all")) sb.Append(" --all");
             string bd = Value(args, "--backup-dir");
             if (bd != null) sb.Append(" --backup-dir \"").Append(bd).Append("\"");
+            if (Has(args, "--force-write")) sb.Append(" --force-write");
             return sb.ToString().Trim();
         }
 
