@@ -1,0 +1,4 @@
+interface:
+  display_name: "Windows Context Menu Cleanup"
+  short_description: "Remove unwanted Explorer right-click menu entries"
+  default_prompt: "Use $windows-context-menu-cleanup to find which registry keys register this right-click menu item, remove them in both registry views, and verify they are really gone."
