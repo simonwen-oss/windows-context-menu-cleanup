@@ -5,11 +5,13 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [1.1.1] - 2026-10-06
 
-Pre-release audit of the published v1.1.0 content: documentation consistency and a
-security scan. No behaviour change beyond clearer diagnostics.
+Pre-release audit of the published content: documentation consistency, a security scan,
+and aligning the executable's internal version string with the release.
 
 ### Changed
 
+- `CtxMenuCleaner.exe` internal version is now `1.1.1` (`--version` previously still
+  reported `1.0.0` while the release was v1.1.0).
 - `--selftest` now states its one side effect before running it: it creates a single
   throwaway key under `HKCU\SOFTWARE\Classes\*\shellex\ContextMenuHandlers` and removes
   it again. Its probe key was renamed from `SelfTestProbe` to
