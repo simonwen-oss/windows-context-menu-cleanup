@@ -28,6 +28,21 @@ This project follows [Semantic Versioning](https://semver.org/).
 - Native executable: the same key is discoverable through both registry views because
   `HKCU\SOFTWARE\Classes` is a single shared store. Entries are now deduplicated by
   logical path, preferring the view that can actually write.
+- Native executable: an **interactive** selection was lost when the tool had to
+  re-launch itself elevated — the elevated instance started with no selection and asked
+  the user to choose again. Slot numbers are now assigned once, up front, and the
+  selection is carried across the elevation boundary as `--select N,M`, so the elevated
+  instance resolves exactly the same components without prompting.
+- Native executable: the elevated instance runs in its own console window and returned
+  before its output could be read. A new `--keep-open` flag holds any exit path — list,
+  cancel, error, or completion — until Enter, and is added automatically when the tool
+  spawns the elevated window. The parent also explains that a second window is expected
+  and that it is waiting for it.
+- Native executable: in interactive mode the elevation question was asked AFTER the user had already typed a selection, and [y/N] defaults to N - so answering normally ended the run with Aborted. and looked like "typing 4 did nothing". Elevation is now decided once, up front, before any selection; a pending --select N is preserved across the re-launch and the prompt says so. --yes / --force-write / --dry-run skip the question.
+- Native executable: an answer containing no valid number was discarded as a quiet "Nothing selected." (exit 0) - including a pasted command that reached ReadLine before the prompt was ready. It now reports the offending input and exits 1, distinguishing "you typed nothing" from "I could not understand what you typed".
+- build.ps1: a running instance locks the executable it was started from, which used to fail the final copy with an obscure IOException after a successful compile. The build now detects the lock, moves the old binary aside and writes the new one, and keeps the staging directory when a build fails so the compiler output can be inspected.
+- Native executable: the delete output printed an internal diagnostic line (`view ...
+  raw ... shape ...`) that was added while debugging the access-denied issue. Removed.
 
 ## [1.0.0] - 2026-10-04
 
