@@ -380,9 +380,13 @@ troubleshooting notes exist so you do not have to rediscover them.
 
 ## License
 
-MIT — see [LICENSE](./LICENSE). This project edits the Windows registry; review the
-scripts and the backup output before running them, and test on a non-critical machine
-first.
+MIT — see [LICENSE](./LICENSE).
+
+> **Registry risk notice.** This project edits the Windows registry: it deletes the
+> keys that register third-party Explorer context-menu entries and exports a `.reg`
+> backup of each key beforehand. Registry edits carry inherent risk — review the
+> scripts and the backup output before running them, and test on a non-critical
+> machine first. The authors take no responsibility for damage resulting from its use.
 
 ---
 
