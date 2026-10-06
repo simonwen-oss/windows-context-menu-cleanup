@@ -344,8 +344,12 @@ Copy-Item . "$env:USERPROFILE\.dsh\skills\windows-context-menu-cleanup" -Recurse
 
 ## Troubleshooting
 
-See [`references/troubleshooting.md`](./references/troubleshooting.md). The most
-expensive ones:
+See [`references/troubleshooting.md`](./references/troubleshooting.md). There is also a
+blunter [`references/lessons-learned.md`](./references/lessons-learned.md) recording the
+conclusions that turned out to be **wrong** ("reported success, deleted nothing", "blamed
+the Chinese comments") together with every PowerShell 5.1 trap hit along the way.
+
+The most expensive ones:
 
 | Symptom | Cause |
 |---|---|
