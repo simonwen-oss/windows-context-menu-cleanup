@@ -13,7 +13,10 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$Token,
-    [string]$Owner = 'simonwenmail-oss',
+    # Must be the CANONICAL owner name. GitHub redirects a renamed account for GETs, but a
+    # redirect on an authenticated PUT/POST drops the Authorization header and the request
+    # comes back "401 Requires authentication" - which looks exactly like a bad token.
+    [string]$Owner = 'simonwen-oss',
     [string]$Repo = 'windows-context-menu-cleanup',
     [string]$Tag = 'v1.0.0',
     [switch]$Private,
