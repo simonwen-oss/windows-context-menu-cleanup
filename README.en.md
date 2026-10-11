@@ -1,285 +1,315 @@
 # windows-context-menu-cleanup
 
-Remove unwanted **Windows Explorer right-click menu entries** added by Baidu Netdisk,
-Thunder/Xunlei, Sogou Input, 360, and similar third-party apps — reliably, with
-verification and a working rollback path.
+Remove the entries that third-party software adds to the Windows Explorer right-click menu
+(Baidu Netdisk, Thunder/Xunlei, Sogou Input, 360 and friends) — **look before you delete,
+delete with a rollback path, and never report a success that did not happen**.
 
-[中文说明](./README.md) · [Changelog](./CHANGELOG.md) · MIT
+[中文说明](./README.md) · [Changelog](./CHANGELOG.md) · [MIT licence](./LICENSE)
 
-**Current release: v1.1.1.** PowerShell tooling plus a **working native executable**
-(`CtxMenuCleaner.exe`; source under `src/`, the binary is not committed). See
-[references/exe.md](./references/exe.md).
+**Current release: v1.1.3.** Two ways to use it: a **native executable** (recommended —
+single file, no PowerShell), and a set of **PowerShell scripts** (no build step, easy to
+audit and extend).
+
+---
+
+## Contents
+
+- [1. What problem this solves](#1-what-problem-this-solves)
+- [2. Main features](#2-main-features)
+- [3. Installation](#3-installation)
+- [4. Usage](#4-usage)
+- [5. Examples](#5-examples)
+- [FAQ](#faq)
+- [Safety and rollback](#safety-and-rollback)
+- [Test environment](#test-environment)
+
+**In a hurry?** Jump to [Quick start](#quick-start).
 
 ---
 
 ## 1. What problem this solves
 
-You delete the registry key, `reg` prints **"The operation completed successfully."**,
-and the menu item is **still there**. This is not a caching problem. There are three
-real causes, and this project handles all three.
+You delete the registry key, `reg` prints **"The operation completed successfully."**, and
+the menu item is **still there**. It is not a caching problem. There are three causes.
 
-### 1.1 The key name is padded with spaces (the big one)
+### 1.1 The key name is space-padded (the main one)
 
-Real capture from a live machine:
+Captured from a real machine:
 
 ```
-HKLM\SOFTWARE\Classes\*\shellex\ContextMenuHandlers
-    key name: [    sgshellext]        length=14
-    charcodes: 0020 0020 0020 0020 0073 0067 ...
-               ^^^^ four leading spaces
+key name : [    sgshellext]        length=14
+charcodes: 0020 0020 0020 0020 0073 0067 ...      <- four leading spaces
 ```
 
-The extension's visible name is `sgshellext`, but the registry key is actually
-`"    sgshellext"`. So this silently deletes nothing, while reporting success:
+The visible name is `sgshellext`, but the key is **actually called** `"    sgshellext"`.
+So both of these commands report success and **delete nothing**:
 
 ```powershell
-Remove-Item 'HKLM:\SOFTWARE\Classes\*\shellex\ContextMenuHandlers\sgshellext' -Force
-reg delete "HKLM\SOFTWARE\Classes\*\shellex\ContextMenuHandlers\sgshellext" /f
+Remove-Item '...\ContextMenuHandlers\sgshellext' -Force
+reg delete "...\ContextMenuHandlers\sgshellext" /f
 ```
 
-OneDrive does the same thing (`" FileSyncEx"`, one leading space), which is why the
-"remove OneDrive from the right-click menu" registry edits found online so often
-appear to work and change nothing.
+OneDrive does the same thing (`" FileSyncEx"`) — which is why the widely copied
+"remove OneDrive from the right-click menu" registry edit appears to work and does not.
 
-**This project never addresses these keys by a fixed name.** It enumerates the
-container and matches substrings.
+> **This project never addresses a fixed key name** — it enumerates the container and
+> matches substrings.
 
-### 1.2 The app registered two mechanisms, and you removed one
+### 1.2 A vendor registers two mechanisms; you removed one
 
-| Shape | Where it lives | What removing it does |
+| Shape | Location | Note |
 |---|---|---|
-| Static verb | `...\shell\<Verb>` plus a `command` subkey | removes that verb |
-| COM shell extension | `...\shellex\ContextMenuHandlers\<Name>`, default value = CLSID | **this is what usually draws the menu item** |
+| Static verb | `...\shell\<verb>` plus a `command` subkey | Removing the verb is enough |
+| COM handler | `...\shellex\ContextMenuHandlers\<name>`, default value is a CLSID | **This is usually what actually draws the menu item** |
 
-Baidu Netdisk registered **both** (`YunShellExplorerCommand` as a static verb *and*
-`YunShellExt` as a COM handler). Deleting only the static verb changes nothing.
+Baidu Netdisk **uses both** (`YunShellExplorerCommand` *and* `YunShellExt`); removing only
+the first changes nothing.
 
-### 1.3 You removed it from one registry view only
+### 1.3 You removed only one registry view
 
-The 32-bit and 64-bit registry views are separate stores. Removing only one leaves
-the other live. Measured on the affected machine: after deleting the 64-bit entries,
-the same keys were still `PRESENT` in the 32-bit view.
+The 32-bit and 64-bit views are **two separate stores**. Removing one leaves the other in
+force (measured: after deleting the 64-bit entry, the same key is still present in the
+32-bit view).
 
-Worse, Windows PowerShell 5.1 cannot even *read* both views from one process
-(`RegistryKey.OpenBaseKey` does not exist there), which is why the scripts here have
-to re-launch 32-bit PowerShell to cover the other view.
+PowerShell 5.1 also **cannot read both views in one process** (`RegistryKey.OpenBaseKey`
+does not exist there), so the scripts re-launch a 32-bit child to cover the other view.
+The native executable has that API and needs only one process.
 
 ---
 
 ## 2. Main features
 
-### Three tools
+### 2.1 Two entry points, pick one
 
-| Tool | What it does |
+| | Native `CtxMenuCleaner.exe` | PowerShell scripts |
+|---|---|---|
+| Needs compiling | One command (compiler ships with Windows) | No |
+| Depends on PowerShell | **Not at all** | Needs the bundled 5.1 |
+| Easy to audit | Requires reading C# | Plain text, open and read |
+| Best for | Everyday use, batch cleanup | Reviewing code, extending it |
+
+**Capabilities are identical**: enumerate-and-match (never a fixed key name), both registry
+views, backup before delete, read-back verification after delete.
+
+### 2.2 Five scripts
+
+| Script | Purpose |
 |---|---|
-| **`manage-context-menu.ps1`** | Lists every context-menu component from both registry views, grouped by the owning DLL/executable, numbered, each labelled third-party or Windows built-in. You pick by number and it removes **all registrations** of that component. |
-| **`remove-vendor-context-menu.ps1`** | Repeatable, scriptable removal driven by vendor patterns from `vendors.json`. Supports adding your own patterns. |
-| **`enumerate-context-menu.ps1`** | Read-only audit: prints the **real** registry key names, character codes for space-padded names, and the COM server DLL behind each handler. |
+| **`manage-context-menu.ps1`** | Lists every component (grouped and numbered by owning DLL/exe, marked third-party or built-in). Pick numbers and it removes **all** of that component's registrations |
+| **`remove-vendor-context-menu.ps1`** | **Repeatable batch removal** driven by `vendors.json` signatures; you can append your own |
+| **`enumerate-context-menu.ps1`** | **Read-only audit**: real key names, character codes, the DLL behind each CLSID. Use it to answer "who owns this menu item?" |
+| **`validate.ps1`** | **Self-check**: JSON loading, `\uXXXX` decoding, syntax, pure-ASCII source, plus a dry run. No admin needed |
+| `_list-view.ps1` | Internal helper (enumerates the 32-bit view); not meant to be run by hand |
 
-### Behaviour that matters
+### 2.3 Two further guarantees
 
-- **Enumeration instead of fixed names** — works around space-padded keys.
-- **Both registry views in one run** — a 64-bit invocation re-launches itself in
-  32-bit PowerShell and merges the result, so you do not have to remember `/reg:32`.
-- **`.reg` backup before every delete** — via `reg.exe export`, which writes UTF-16LE,
-  exactly what `reg import` expects. Rollback is one command.
-- **Verified deletes** — after each removal the key is re-read. A failure is reported
-  as `FAILED (exit N): ...` or `STILL PRESENT`; it is never swallowed.
-- **Safe by default** — Windows built-ins are labelled and treated conservatively:
-  anything that cannot be positively attributed to a third party (a bare module name
-  like `@shell32.dll,-8506`, a generic verb like `open`/`runas`, an unresolved CLSID)
-  is classified as a built-in. `manage-context-menu.ps1` does not print them and
-  `-SelectWin` is needed to touch them at all.
-- **No third-party dependencies** — plain Windows PowerShell 5.1 and `reg.exe`.
-- **ASCII-only script sources** — PowerShell 5.1 reads a BOM-less UTF-8 script using
-  the ANSI code page, which mangles literal non-ASCII text (including inside paths).
-  Scripts here keep their source ASCII and build CJK patterns from `\uXXXX` escapes or
-  code points.
+- **Read-back verification after every delete, errors never swallowed** — failures are
+  reported explicitly as `-> FAILED: ...`. This is where the project started: the first
+  version trusted `reg`'s exit code and falsely reported success once.
+- **Safe by default** — Windows built-ins are marked and **never selected by default**.
+  Anything not clearly attributable to a third party (bare module names such as
+  `@shell32.dll,-8506`, generic verbs such as `open`/`runas`, unresolved CLSIDs) counts as
+  built-in. Only `-SelectWin` touches them.
 
-### What it does *not* do
+### 2.4 What it does **not** do
 
-- It does **not** uninstall apps, delete their files, or change file associations. It
-  only removes the context-menu *registration* keys.
-- It does **not** prevent the vendor from re-registering on its next update. See
-  [Making removal stick](#making-removal-stick).
-- It does **not** cover Explorer's own toolbar, the "Send to" folder, or Internet
-  Explorer `MenuExt` entries.
+- It does **not uninstall** software, delete files, or change file associations — only the
+  right-click menu **registrations**.
+- It **cannot stop** software from re-registering on its next launch; see
+  [preventing the menu from coming back](#preventing-the-menu-from-coming-back).
+- It does **not cover** the Explorer toolbar, the "Send to" folder, or Internet Explorer's
+  `MenuExt` entries.
 
 ---
 
 ## 3. Installation
 
-No installer, no dependencies beyond Windows itself.
+No installer; no dependency beyond Windows itself.
 
-**Requirements**
+| Item | Requirement |
+|---|---|
+| Operating system | Windows 10 / 11 — measured on Windows 10 22H2 (build 19045) |
+| PowerShell | 5.1 (bundled) **measured**; 7+ should work by design but is **untested** |
+| .NET Framework | 4.x (bundled with Windows 10), needed only to compile the exe |
+| Administrator | Needed to delete; not needed for `--list` / `-ListOnly` / `--dry-run` / `-DryRun` / `--selftest` / `validate.ps1` |
 
-- Windows 10 or 11 — verified on Windows 10 22H2 (build 19045)
-- Windows PowerShell 5.1 (built into Windows) — **verified**
-- PowerShell 7+ — expected to work from the code, but **not verified on this project**
-- Administrator rights for removal. Not needed for `-DryRun`, `-ListOnly`, or
-  `enumerate-context-menu.ps1`
-
-**Get the files**
+Get the files:
 
 ```powershell
-git clone https://github.com/<you>/windows-context-menu-cleanup.git
+git clone https://github.com/simonwen-oss/windows-context-menu-cleanup.git
 cd windows-context-menu-cleanup
 ```
 
-Or download the ZIP from the Releases page and extract it anywhere. If you hit an
-execution-policy error, run the scripts with `-ExecutionPolicy Bypass`:
+Or download the ZIP from [Releases](https://github.com/simonwen-oss/windows-context-menu-cleanup/releases).
+
+> If you hit `running scripts is disabled`, add `-ExecutionPolicy Bypass`, e.g.
+> `powershell -ExecutionPolicy Bypass -File .\scripts\validate.ps1`.
+
+**Self-check first** (read-only, no admin, expected to end with `ALL CHECKS PASSED`):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\validate.ps1
 ```
 
-**Sanity check before you delete anything** (read-only, no admin needed):
+**Compile the executable** (optional):
 
 ```powershell
-.\scripts\validate.ps1
+.\src\build.ps1 -Test        # output: %LOCALAPPDATA%\CtxMenuCleaner\CtxMenuCleaner.exe
 ```
 
-It checks JSON loading, `\uXXXX` decoding, that the scripts parse in your PowerShell
-edition, that their sources are ASCII-only, and then performs a dry run. Expected
-output ends with `ALL CHECKS PASSED`.
+> ⚠️ The default output location is deliberate — **do not move it into a folder whose path
+> contains non-ASCII characters or is synced by OneDrive**. An exe launched from such a path
+> cannot write to the registry at all. See
+> [FAQ](#running-the-exe-from-a-non-ascii-or-onedrive-folder-makes-every-delete-fail).
 
 ---
 
 ## 4. Usage
 
-### Pick items by hand (recommended)
+### Quick start
 
 ```powershell
-# 1. Look at everything (no admin needed, changes nothing)
-.\scripts\manage-context-menu.ps1 -ListOnly
+# ---------- native exe (recommended) ----------
+$ctx = "$env:LOCALAPPDATA\CtxMenuCleaner\CtxMenuCleaner.exe"
+& $ctx --list                 # 1. see the list (no admin, changes nothing)
+& $ctx --select 4 --dry-run   # 2. rehearse; confirm what it would remove
+& $ctx --select 4 --yes       # 3. really remove (elevated shell); --yes reads no keyboard
 
-# 2. Pick numbers (elevated PowerShell)
-.\scripts\manage-context-menu.ps1
+# ---------- PowerShell scripts ----------
+.\scripts\manage-context-menu.ps1 -ListOnly      # 1. see the list (no admin)
+.\scripts\manage-context-menu.ps1 -Select 4      # 2. really remove (elevated shell)
+.\scripts\remove-vendor-context-menu.ps1 -DryRun # rehearse the signature-based removal
 ```
 
-`-ListOnly` prints third-party components by default. Windows built-ins are still
-numbered, so you can target one deliberately, but they are not printed unless you use
-`-Grid` (which lists everything) or `-SelectWin`.
+**Slot numbers**: third-party components start at `1`, Windows built-ins follow. Numbers
+depend on enumeration order and **can change between runs** — look first, then delete.
+`manage-context-menu.ps1` has no dry-run switch; use `-ListOnly` to look.
 
-**Parameters of `manage-context-menu.ps1`**
+### Screenshots
 
-| Parameter | Meaning |
-|---|---|
-| `-ListOnly` | print the numbered list and exit; deletes nothing; no admin needed |
-| `-Grid` | pick with a searchable window (checkboxes) instead of typing numbers |
-| `-Select <int[]>` | remove these numbers directly, e.g. `-Select 3,7` |
-| `-SelectWin` | select all Windows built-ins (advanced; see the warning below) |
-| `-NoRestart` | do not restart Explorer afterwards |
-| `-NoBackup` | skip the `.reg` backups (not recommended) |
-| `-ExportMyVendors <path>` | write the third-party key names it found to a JSON file you can feed to `-VendorsFile`. Starting point, not a finished config: real key names can be bare CLSIDs or verb ids, so trim the list before relying on it. |
-| `-BackupDir <path>` | where to write backups; default `.\context-menu-backup-<timestamp>` |
+**`--list` shows you what is there** (no admin, changes nothing):
 
-### Pattern-based removal
+![CtxMenuCleaner --list output](docs/ctxmenu-list.png)
 
-```powershell
-# 1. See what matches the built-in + vendors.json patterns
-.\scripts\remove-vendor-context-menu.ps1 -DryRun
+The highlighted rows are entries whose **key name is space-padded** — those cannot be
+removed by fixed name, which is the main reason this project exists.
 
-# 2. Remove (elevated)
-.\scripts\remove-vendor-context-menu.ps1
-```
+**Interactive removal, and that `YES`:**
 
-**Parameters of `remove-vendor-context-menu.ps1`**
+![CtxMenuCleaner interactive removal flow](docs/ctxmenu-delete-flow.png)
 
-| Parameter | Meaning |
-|---|---|
-| `-DryRun` | list matches, delete nothing, no admin needed |
-| `-Pattern <string[]>` | add your own key-name substrings on top of the configured ones |
-| `-VendorsFile <path>` | use a different vendor config (default `scripts\vendors.json`) |
-| `-BackupDir <path>` | where to write backups |
-| `-NoPause` | do not wait for Enter at the end (for scripted use) |
+After entering the numbers you must still type `YES` in upper case before anything is
+deleted. Add `--yes` to skip it (the command then reads no keyboard at all).
 
-Configuration lives in [`scripts/vendors.json`](./scripts/vendors.json) — 7 vendor
-entries, 25 key-name patterns. Write CJK keywords as `\uXXXX` escapes; the script
-decodes them itself because PowerShell 5.1's `ConvertFrom-Json` does not.
+### Where the options are documented
 
-### Audit only
+- **exe**: run `CtxMenuCleaner.exe --help`. Every option is grouped under
+  **Options / Diagnostics / Misc**.
+- **scripts**: the sections below cover them by task; the full reference, including a
+  Chinese-language table, is in [`references/exe.md`](./references/exe.md) and in each
+  script's header.
 
-```powershell
-.\scripts\enumerate-context-menu.ps1
-```
+Signatures live in [`scripts/vendors.json`](./scripts/vendors.json) (7 vendors, 25
+patterns). Non-ASCII keywords must be written as `\uXXXX` escapes — PowerShell 5.1's
+`ConvertFrom-Json` does not decode them, so the scripts decode them themselves.
 
-Read-only. Prints the real key name of every registration, flags padded names with
-their character codes, resolves each CLSID to its DLL, and shows static-verb command
-lines. It reads the **64-bit** registry view.
+`enumerate-context-menu.ps1` takes no parameters; it is read-only and reads the 64-bit view.
+
+### ⚠️ Interactive mode: that `YES`
+
+Running the exe with neither `--list` nor `--select` starts interactive mode: it asks for
+slot numbers at `Selection:`, then **requires three upper-case letters `YES`** before it
+deletes anything. Anything else — including a bare Enter — merely cancels.
+
+**This is the easiest trap in the whole tool** — typing the next command at that prompt is
+read as a cancel, which looks exactly like "typing 4 did nothing". Add `--yes` to avoid it
+entirely. Full transcript in [example D](#example-d--interactive-removal-note-the-yes).
 
 ### About restarting Explorer
 
-The scripts restart Explorer after a successful removal so the menu refreshes
-immediately. **Your taskbar and desktop icons will disappear and come back** — that is
-normal, not a crash. Use `-NoRestart` to skip it and restart Explorer yourself later.
+A successful removal restarts Explorer so the menu refreshes immediately. **Your taskbar
+and desktop icons disappear for a moment and come back** — that is normal, not a crash. Use
+`-NoRestart` / `--no-restart` to skip it:
 
-### Warning about `-SelectWin`
+```powershell
+Stop-Process -Name explorer -Force; Start-Sleep 2; Start-Process explorer.exe
+```
 
-`-SelectWin` removes Windows' own shell extensions, including things like "Open with",
-"Send to", "Pin to Start" and sharing entries. This can break Explorer. It exists for
-advanced troubleshooting only. Prefer `-Select` with specific numbers.
+### ⚠️ `-SelectWin` warning
+
+It selects Windows' own shell extensions ("Open with", "Send to", "Pin to Start", Sharing
+and so on) and **can break Explorer**. It exists for advanced troubleshooting only — prefer
+naming specific numbers with `-Select`. (The exe's `--all` merely **lists** built-ins; it
+does not select them, so it is safe.)
 
 ---
 
 ## 5. Examples
 
-### Example A — see what is in your menu (safe, no admin)
+### Example A — see what is in the menu (safe, no admin)
 
 ```powershell
-PS> .\scripts\manage-context-menu.ps1 -ListOnly
+PS> & $ctx --list
 
-=== Windows built-ins (NOT selected; only remove these if you know why) ===
-...
-=== Third-party add-ons ===
-  [ 47] shellext.dll   (3 registration(s))
-        from: C:\Program Files\Windows Defender
-        Directory               COM handler   64-bit HKLM
-        Drive                   COM handler   64-bit HKLM
-        *                       COM handler   64-bit HKLM
-  [ 50] FileSyncShell64.dll   (4 registration(s))
-        from: C:\Program Files\Microsoft OneDrive\26.168.0830.0006
+ CtxMenuCleaner 1.1.3    64-bit process: True    Elevated: False
+Found 52 component(s): 7 third-party, 45 Windows built-in.
+
+  [  1] FileSyncShell64.dll   (4 registration(s))
+        from: C:\Program Files\Microsoft OneDrive\26.173.0906.0008
+        *                       COM handler   64-bit HKLM   [padded key name]
         Directory               COM handler   64-bit HKLM   [padded key name]
-        lnkfile                 COM handler   64-bit HKLM   [padded key name]
         ...
-  [ 60] QQMusic.exe  [QQMusic.2.Add]   (2 registration(s))
-        runs: "C:\Program Files\QQMusic\QQMusic.exe" /add "%1"
-        Directory               static verb  64-bit HKLM
-        Directory               static verb  32-bit HKLM
+  [  4] YunShellExtV164.dll   (2 registration(s))
+        from: C:\Users\<user>\AppData\Roaming\baidu\BaiduNetdisk
+        *                       COM handler   64-bit HKLM
+        Directory               COM handler   64-bit HKLM
+
+(7 slot(s) shown of 52 total. Windows built-ins are numbered too but not shown; --all shows them.)
 ```
 
-Note `[padded key name]` — that is the anti-removal trick being detected and flagged.
+Note `[padded key name]` — that is the anti-removal trick **being detected and flagged**.
 
-### Example B — remove one component interactively
+### Example B — rehearse, confirm what would be removed
 
 ```powershell
-PS> .\scripts\manage-context-menu.ps1
-...
-Enter the numbers of the components to DELETE, separated by spaces or commas.
-  e.g.   1 4 7   or   2,3        (empty = cancel)
-Selection: 3
+PS> & $ctx --select 4 --dry-run
+About to remove 2 registry key(s) from 1 component(s).
+Dry run: nothing was deleted.
+```
 
-About to remove 4 registry key(s) from 1 component(s).
-Type YES to confirm: YES
+### Example C — really remove, in one non-interactive step
 
-Deleting [OneDrive]  HKLM\Directory\shellex\ContextMenuHandlers\ FileSyncEx
-        backup -> .\context-menu-backup-<timestamp>\HKLM_Directory_shellex_ContextMenuHandlers__FileSyncEx.reg
+```powershell
+# elevated shell
+PS> & $ctx --select 4 --yes
+
+Deleting HKLM\*\shellex\ContextMenuHandlers\YunShellExt
+        backup -> C:\ctx-backup\HKLM___shellex_ContextMenuHandlers_YunShellExt.reg
         -> DELETED
-...
-Deleted 4, failed 0.
-Backups in .\context-menu-backup-<timestamp>
-Restarting Explorer...
-Explorer is running (pid 12345).
+Deleting HKLM\Directory\shellex\ContextMenuHandlers\YunShellExt
+        backup -> C:\ctx-backup\HKLM_Directory_shellex_ContextMenuHandlers_YunShellExt.reg
+        -> DELETED
+
+Deleted 2, failed 0.   Backups in C:\ctx-backup
+Restarting Explorer so the menu refreshes...
+Explorer is running (pid 5600).
 ```
 
-### Example C — scripted, no prompts
+### Example D — interactive removal (note the `YES`)
 
 ```powershell
-# Elevated shell
-.\scripts\manage-context-menu.ps1 -Select 3,7 -NoRestart
+PS> & $ctx
+...
+Selection: 4
+
+About to remove 2 registry key(s) from 1 component(s).
+
+>>> Type YES (three letters, upper case) and press Enter to actually delete.
+>>> Anything else - including just Enter - cancels. Nothing has been changed yet.
+Type YES to confirm: YES          <- must be upper-case YES
 ```
 
-### Example D — remove known vendors by pattern
+### Example E — signature-based batch removal with the PowerShell script
 
 ```powershell
 PS> .\scripts\remove-vendor-context-menu.ps1 -DryRun
@@ -292,205 +322,173 @@ MATCH  HKLM /reg:64 *\shellex\ContextMenuHandlers
 === 64-bit view: matched 8, deleted 0, failed 0 (dry run) ===
 ```
 
-Then, elevated and without `-DryRun`, each match becomes `-> DELETED` or
+Drop `-DryRun` and run elevated, and each match becomes `-> DELETED` or
 `-> FAILED (exit N): ...`.
 
-### Example E — add a vendor of your own
+### Example F — find out who owns a menu item
 
 ```powershell
-# 1. Find the key name with the audit tool
-.\scripts\enumerate-context-menu.ps1 | Select-String -Pattern 'PADDED' -Context 3,0
-
-# 2. Add the substring to scripts/vendors.json
-#    { "vendor": "Some App", "patterns": ["SomeAppShellExt"] }
-
-# 3. Dry-run, then remove
-.\scripts\remove-vendor-context-menu.ps1 -DryRun
-.\scripts\remove-vendor-context-menu.ps1
+PS> .\scripts\enumerate-context-menu.ps1 | Select-String 'PADDED' -Context 3,0
 ```
 
-### Example F — roll back
+It prints the real key name, its character codes, and the DLL behind each CLSID. Take the
+key-name substring, add it to `patterns` in
+[`scripts/vendors.json`](./scripts/vendors.json), then `-DryRun` → remove:
+
+```json
+{ "vendor": "SomeApp", "patterns": ["SomeAppShellExt"] }
+```
+
+### Example G — roll back
 
 ```powershell
 reg import ".\context-menu-backup-<timestamp>\HKLM_Directory_shellex_ContextMenuHandlers__FileSyncEx.reg"
-# then restart Explorer
 Stop-Process -Name explorer -Force; Start-Sleep 2; Start-Process explorer.exe
 ```
 
-### Making removal stick
+### Preventing the menu from coming back
 
-Vendors usually re-create these keys on the next launch or update. In order of
+Software usually **writes the keys back** on its next launch or update. In order of
 preference:
 
-1. **Turn the integration off in the app's own settings.** Cleanest, and it survives
-   updates. (Sogou: 属性设置 → 高级 → 右键菜单. Baidu Netdisk and Thunder have similar
-   toggles.)
-2. **Deny write access on the specific keys** for your user, so the app cannot
-   re-create them — `regini` or an ACL edit. More forceful; must be redone if an
-   installer recreates the key with fresh ACLs.
-3. **Re-run this script** after the vendor updates.
+1. **Turn the integration off in the application's own settings** — cleanest, and it
+   survives updates (Sogou: Properties → Advanced → context menu; Baidu Netdisk and Thunder
+   have similar switches).
+2. **Deny write access on the specific keys** (`regini` or an ACL change) — heavier handed;
+   if an installer recreates the key with a fresh ACL you have to redo it.
+3. **Re-run this script after each update.**
+
+## FAQ
+
+### Running the exe from a non-ASCII or OneDrive folder makes every delete fail
+
+Symptom: `--list` works, but every delete reports
+`-> FAILED: OpenSubKey(writable) ... SecurityException HR=0x8013150A`. This is not a
+permissions misconfiguration but a **launch location** problem (same binary, measured):
+
+| exe launched from | can write HKCU |
+|---|---|
+| `C:\Users\<user>\OneDrive\文档\...` (non-ASCII + OneDrive) | ❌ not at all |
+| `C:\Users\<user>\AppData\Local\Temp\...` | ✅ fine |
+| `C:\Users\<user>\AppData\Local\CtxMenuCleaner\` | ✅ fine |
+
+**Fix**: confirm with the single command `--selftest`, then put the exe on a pure-ASCII path
+(the default build location already is one). The PowerShell scripts are **not affected** —
+`powershell.exe` runs them, they are not a process launched from that folder.
+
+### A delete reported success but the menu item is still there
+
+Check whether the `--list` row shows `[padded key name]`, and whether you removed **both**
+the static verb and the COM handler
+(see [1.2](#12-a-vendor-registers-two-mechanisms-you-removed-one)). Then confirm both
+registry views were covered (the exe always does; the scripts add the 32-bit view
+automatically).
+
+### Typing a number in interactive mode does nothing
+
+The program is waiting for an upper-case **`YES`** at `Type YES to confirm:`. Anything else
+cancels (it now reports what it actually received). Use `--yes` to skip the step entirely.
+
+### Non-ASCII text comes out as mojibake
+
+A 5.1 console decodes child-process output using the ANSI code page (936 on the test
+machine). Keeping the script sources pure ASCII is what avoids this class of problem.
+
+### More traps
+
+| Symptom | Cause |
+|---|---|
+| `MethodNotFound: ... OpenBaseKey` | That API is .NET Core / PS 7 only and you are on 5.1. Check `$PSVersionTable.PSEdition` |
+| `Access is denied` | The key is under `HKLM` and the process is not elevated |
+| 64-bit menu item gone, 32-bit still there (or vice versa) | The other registry view was not handled |
+| `New-Item` creates an oddly concatenated key name | `*` is a wildcard to the PowerShell registry provider. Read with `-LiteralPath`, delete with `reg.exe` |
+| Desktop and taskbar vanished | You killed Explorer; `Start-Process explorer.exe` restores it |
+
+- Full guide: [references/troubleshooting.md](./references/troubleshooting.md)
+- **The wrong conclusions reached during development**:
+  [references/lessons-learned.md](./references/lessons-learned.md)
+- Measured vendor registration points and real key names:
+  [references/field-notes.md](./references/field-notes.md)
+- Full executable reference: [references/exe.md](./references/exe.md)
 
 ---
 
-## Using this as a DSH skill
+## Safety and rollback
 
-This repository is also a valid [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
-skill. Copy the folder into `$DSH_HOME/skills/` (usually `~/.dsh/skills/`), keeping
-`SKILL.md` at the root:
+**Backup**: before deleting, every key is exported with `reg.exe export` into a `.reg` file
+(UTF-16LE, which is exactly what `reg import` expects):
+
+```
+context-menu-backup-20261006-221917\
+    HKLM___shellex_ContextMenuHandlers_YunShellExt.reg
+```
+
+**Restore**:
+
+```powershell
+reg import "context-menu-backup-20261006-221917\HKLM___shellex_ContextMenuHandlers_YunShellExt.reg"
+Stop-Process -Name explorer -Force; Start-Sleep 2; Start-Process explorer.exe
+```
+
+**Registry risk**: this project modifies the registry, which carries inherent risk —
+**review the scripts and the backups first, and test on a machine you do not depend on**.
+The author accepts no liability for damage; see [LICENSE](./LICENSE).
+
+**As a DSH skill**: this repository is also a valid
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) skill. Copy the whole
+directory into `$DSH_HOME/skills/` (usually `~/.dsh/skills/`), keeping `SKILL.md` at its
+root:
 
 ```powershell
 Copy-Item . "$env:USERPROFILE\.dsh\skills\windows-context-menu-cleanup" -Recurse
 ```
 
-## Troubleshooting
-
-See [`references/troubleshooting.md`](./references/troubleshooting.md). There is also a
-blunter [`references/lessons-learned.md`](./references/lessons-learned.md) recording the
-conclusions that turned out to be **wrong** ("reported success, deleted nothing", "blamed
-the Chinese comments") together with every PowerShell 5.1 trap hit along the way.
-
-The most expensive ones:
-
-| Symptom | Cause |
-|---|---|
-| `MethodNotFound: ... does not contain a method named OpenBaseKey` | You are on PowerShell 5.1; that API is .NET Core / PS 7 only. Check `$PSVersionTable.PSEdition`. |
-| `Access is denied` | The key is under `HKLM` and the process is not elevated. |
-| Item gone for 64-bit apps but not 32-bit (or vice versa) | The other registry view. |
-| `New-Item` made one weird concatenated key | The `*` class key is a wildcard to the PowerShell registry provider. Use `-LiteralPath` to read and `reg.exe` to delete. |
-| Desktop and taskbar disappeared | Explorer was killed; `Start-Process explorer.exe` brings it back. |
-| Chinese text turned into mojibake | A PS 5.1 console decodes child output using the ANSI code page. Keep script source ASCII. |
-
-Verified vendor registration points (with the exact real key names, including padding)
-are recorded in [`references/field-notes.md`](./references/field-notes.md).
-
-## Roadmap
-
-- **v1.0.0** — PowerShell tooling, no compiled binary.
-- **v1.1.0 (this release)** — adds the working native `CtxMenuCleaner.exe`, the
-  `src/publish.ps1` release tool, and a batch of executable fixes (see
-  [CHANGELOG](./CHANGELOG.md)).
-- **Later** — interactive input timing can still be consumed by a preceding prompt on
-  some terminals; prefer `--select N --yes` (see
-  [references/exe.md](./references/exe.md)).
-
-## The native executable (CtxMenuCleaner.exe)
-
-Compiled with the C# compiler that ships with Windows: **single file, no dependencies,
-no PowerShell**. It reads **both** registry views in one process via
-`RegistryKey.OpenBaseKey` — which PowerShell 5.1 cannot do — so it has no PowerShell
-version dependency at all.
-
-Full details in [references/exe.md](./references/exe.md). The essentials:
-
-```powershell
-# Build (output goes to %LOCALAPPDATA%\CtxMenuCleaner\, deliberately avoiding non-ASCII paths)
-.\src\build.ps1 -Test
-
-$ctx = "$env:LOCALAPPDATA\CtxMenuCleaner\CtxMenuCleaner.exe"
-
-# See the list (no admin needed, changes nothing)
-& $ctx --list
-
-# Dry run (deletes nothing)
-& $ctx --select 4 --dry-run
-
-# Remove (--yes skips the confirmation, so it reads no keyboard input at all - recommended)
-& $ctx --select 4 --yes
-
-# Interactive: it lists first, waits for your numbers at "Selection:",
-# then requires you to type an upper-case YES at "Type YES to confirm:" before deleting.
-& $ctx
-```
-
-> **One easy trap in interactive mode**: after you enter the numbers, the program stops
-> and requires **`YES`** (three upper-case letters) before it deletes anything. Anything
-> else — including a bare Enter — just cancels. Use `--yes` to skip that step.
-
-**Common options**
-
-| Option | Meaning |
-|---|---|
-| `--list` | list only |
-| `--all` | include Windows built-ins in the list |
-| `--select N[,M...]` | remove these slot numbers |
-| `--dry-run` | show what would happen, delete nothing |
-| `--yes` | skip the `Type YES` confirmation |
-| `--grid` | pick with a searchable check-box window |
-| `--auto-elevate` | re-launch elevated without asking `[Y/n]` |
-| `--no-restart` | do not restart Explorer |
-| `--no-backup` | skip the `.reg` backups (not recommended) |
-| `--backup-dir D` | where to write backups |
-| `--selftest` | report whether this process can write to HKCU (diagnoses the path issue) |
-| `--stdin-info` | report whether stdin is a real terminal (diagnoses input issues) |
-| `--log <file>` | record what every prompt actually read (diagnoses input issues) |
-| `--keep-open` | wait for Enter before exiting, so the window cannot vanish |
-
-⚠️ **Do not run the exe from a non-ASCII or OneDrive-synced folder.** On the test machine,
-a binary launched from `C:\Users\<user>\OneDrive\文档\...` could not write to the registry
-at all, while the identical binary copied to an ASCII path worked. That is why `build.ps1`
-outputs to `%LOCALAPPDATA%` by default. Verify with `CtxMenuCleaner.exe --selftest`.
-
-## Credits and provenance
-
-Every pitfall documented here was hit for real while removing Baidu Netdisk, Thunder
-and Sogou Input entries from a live machine — including a first attempt that reported
-success with zero bytes deleted, a script that died on line 90 because of the
-`OpenBaseKey` mistake, and a killed Explorer that left a blank desktop. The
-troubleshooting notes exist so you do not have to rediscover them.
-
-## License
-
-MIT — see [LICENSE](./LICENSE).
-
-> **Registry risk notice.** This project edits the Windows registry: it deletes the
-> keys that register third-party Explorer context-menu entries and exports a `.reg`
-> backup of each key beforehand. Registry edits carry inherent risk — review the
-> scripts and the backup output before running them, and test on a non-critical
-> machine first. The authors take no responsibility for damage resulting from its use.
-
 ---
 
 ## Test environment
 
-All verification for this release was performed on the machine described below.
-Anything marked *not verified* must not be assumed to work.
+Every verification was performed on the machine below. **Anything marked untested should not
+be treated as working.**
 
 | Item | Value |
 |---|---|
-| **Verified on** | 2026-10-06 |
-| **OS** | Windows 10 Pro 22H2 |
-| **Build** | 10.0.19045.6466 (`CurrentBuild 19045`, `UBR 6466`, `ReleaseId 2009`) |
-| **Architecture** | 64-bit |
-| **CPU** | 12th Gen Intel Core i5-12600KF (10 cores / 16 threads) |
-| **RAM** | 31.8 GB |
-| **System locale** | Chinese (Simplified, China) · `zh-CN` |
-| **ANSI code page** | 936 (GBK) — the reason the script sources must stay pure ASCII |
-| **Windows PowerShell** | 5.1.19041.6456 (`PSEdition = Desktop`) **← all testing done here** |
-| **CLR** | 4.0.30319.42000 |
-| **.NET Framework** | 4.8.09037 |
-| **C# compiler** | `csc.exe` 4.8.9232.0 (used only by the unreleased v2 executable) |
-| **reg.exe** | `C:\Windows\system32\reg.exe` |
+| Verification date | 2026-10-06 |
+| Operating system | Windows 10 Pro 22H2, build 10.0.19045.6466 (64-bit) |
+| Language / locale | Chinese (Simplified) · `zh-CN` |
+| **ANSI code page** | **936 (GBK)** — the reason the scripts must stay pure ASCII |
+| **Windows PowerShell** | 5.1.19041.6456 (`Desktop`) **← all testing done here** |
+| .NET / csc.exe | .NET FW 4.8.09037 / csc 4.8.9232.0 (used to compile the exe) |
+| Hardware | i5-12600KF (10 cores / 16 threads) · 31.8 GB |
 | **PowerShell 7+** | **not installed, not tested** |
-| **Time zone** | China Standard Time (UTC+08:00) |
 
-### Verified on this machine
+**Measured as working**
 
-- All 5 scripts parse under PowerShell 5.1 with **0 non-ASCII bytes** in their sources.
-- `validate.ps1` passes completely, including the `\u641c\u72d7` → `641C 72D7` decode
-  assertion.
-- A key name padded with 4 leading spaces is enumerated, matched and **actually
-  deleted** (proved with a temporary HKCU test key).
-- A CJK key name (`百度网盘`) is matched correctly (proved with a temporary test key,
-  then removed).
-- Both registry views are covered; the 32-bit view is merged in from a child process.
-- `reg.exe export` produces a 356-byte UTF-16LE backup that `reg import` accepts.
-- All 13 documented parameters were invoked for real and resolve correctly.
-- `-DryRun` was confirmed to perform no deletions.
-- The original targets (8 Sogou + 8 Baidu keys, 16 in total) end at **0 remaining**.
+- All 8 scripts parse under 5.1; sources contain **0 non-ASCII bytes**
+- `validate.ps1` passes fully (including the `\u641c\u72d7` → `641C 72D7` decoding assertion)
+- A key name with **4 leading spaces** can be enumerated, matched and **really deleted**;
+  the Chinese key name `百度网盘` matches correctly
+- Backups produced by `reg.exe export` can be consumed by `reg import`
+- exe: both views read in one process (7-Zip appears as both `7-zip.dll` and `7-zip32.dll`),
+  padded key names flagged, `--dry-run` deletes nothing, `--selftest` reports write access
+- exe: console colour works and **degrades to plain text when output is redirected**
+  (`--no-color` also forces that)
+- exe: **the interactive flow was completed in a real elevated terminal** (numbers parsed →
+  `YES` → 2 HKLM keys deleted → backups written → Explorer restarted)
+- Original target (Sogou 8 entries + Baidu 8 entries) left **0** behind
 
-### Not verified
+**Explicitly untested**
 
-- PowerShell 7+ (`pwsh`) behaviour — designed for, never executed.
-- Windows 11, or any build other than 19045.6466.
-- Non-Chinese system locales (the ASCII-source design should make these safe, but it
-  has not been exercised).
+- PowerShell 7+ (`pwsh`) · Windows 11 · any non-Chinese locale · any build other than
+  19045.6466
+
+---
+
+## Credits and provenance
+
+Every trap documented here was hit **for real** while removing Baidu Netdisk, Thunder and
+Sogou Input from an actual machine — including the first "reported success but deleted zero
+bytes", the script dying on line 90 because of `OpenBaseKey`, and a blank desktop after
+killing Explorer.
+
+This documentation exists so you do not have to hit them again. Developers should start with
+[references/lessons-learned.md](./references/lessons-learned.md).
