@@ -3,6 +3,43 @@
 All notable changes to this project are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.3] - 2026-10-06
+
+Documentation and usability. The PowerShell scripts are unchanged.
+
+### Added
+
+- Console colour in the native executable: component rows white, detail rows dark grey,
+  **space-padded key-name rows yellow**, `-> DELETED`, `Deleted N, failed 0.` and
+  `Explorer is running` green, failures red. It degrades to plain text automatically when
+  stdout is redirected (`Console.IsOutputRedirected`) and `--no-color` forces that, so
+  capturing the output from a script is unaffected.
+- `--no-color` option.
+- `docs/ctxmenu-list.png` and `docs/ctxmenu-delete-flow.png` — console previews rendered from
+  the program's real output and colour scheme, with machine-specific paths replaced by
+  `%ProgramFiles%` / `%APPDATA%` placeholders. Shown in both READMEs.
+- `README.en.md` rewritten to mirror the Chinese README section for section.
+
+### Changed
+
+- `CtxMenuCleaner.exe --help` regrouped into **Usage / Options / Diagnostics / Misc /
+  Notes**, and it now lists every option. The READMEs no longer duplicate that list — the
+  binary is the source of truth, with a Chinese table in `references/exe.md`.
+- Both READMEs trimmed and restructured: table of contents, a "quick start" block, an
+  explicit description of the interactive `YES` step, screenshots, a consolidated FAQ, and
+  the option reference moved out of the main document.
+- The `CtxMenuCleaner.exe` internal version is now `1.1.3`, matching the release. It had
+  lagged behind (still reporting `1.0.0` while the release was `v1.1.0`).
+
+### Verified
+
+- Redirected and piped output contains **0 ESC bytes** — colour is console-only.
+- Every option claimed in `references/exe.md` (19) appears in `--help`.
+- All anchors and relative links in both READMEs resolve, including the two image paths.
+- Security scan of all files, including the new PNGs: no credentials, no personal paths, no
+  host identifiers.
+- `--selftest` leaves no probe key behind.
+
 ## [1.1.2] - 2026-10-06
 
 Documentation only. No code change: the executable and scripts are identical to v1.1.1.
