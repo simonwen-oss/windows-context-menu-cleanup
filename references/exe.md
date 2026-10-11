@@ -70,11 +70,16 @@ directory.
 
 ## Usage
 
+Verbatim output of `CtxMenuCleaner.exe --help` (the version line reflects the build):
+
 ```
-CtxMenuCleaner.exe                     interactive: list, then pick numbers
-CtxMenuCleaner.exe --list              list only (no admin needed)
-CtxMenuCleaner.exe --select 3,7        remove those numbers
-CtxMenuCleaner.exe --select 3,7 --yes  same, without any prompting
+CtxMenuCleaner 1.1.3 - clean up Explorer right-click menu entries
+
+Usage:
+  CtxMenuCleaner.exe                     interactive: list, then pick numbers
+  CtxMenuCleaner.exe --list              list only (no admin needed)
+  CtxMenuCleaner.exe --select 3,7        remove those numbers
+  CtxMenuCleaner.exe --select 3,7 --yes  same, without any prompting
 
 Options:
   --list           list components only; no admin, changes nothing
@@ -100,6 +105,13 @@ Diagnostics:
 Misc:
   --version        print the version
   --help           this text
+
+Notes:
+  Both 32-bit and 64-bit registry views are handled by this one process.
+  Windows built-ins are never selected by default; --select can still
+  target them deliberately.
+  Slot numbers come from --list and can change between runs.
+  Interactive mode requires an upper-case YES before it deletes.
 ```
 
 That is exactly what `CtxMenuCleaner.exe --help` prints, so this section cannot drift
