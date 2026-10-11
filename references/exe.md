@@ -73,22 +73,67 @@ directory.
 ```
 CtxMenuCleaner.exe                     interactive: list, then pick numbers
 CtxMenuCleaner.exe --list              list only (no admin needed)
-CtxMenuCleaner.exe --all               include Windows built-ins in the list
-CtxMenuCleaner.exe --grid              pick in a searchable window
 CtxMenuCleaner.exe --select 3,7        remove those numbers
-CtxMenuCleaner.exe --dry-run           show what would happen
+CtxMenuCleaner.exe --select 3,7 --yes  same, without any prompting
 
-  --yes            skip the YES confirmation
+Options:
+  --list           list components only; no admin, changes nothing
+  --all            include Windows built-ins in the list
+  --select N[,M]   remove these slot numbers
+  --dry-run        show what would happen, delete nothing
+  --yes            skip the YES confirmation (reads no keyboard input)
+  --grid           pick with a searchable check-box window
+  --auto-elevate   re-launch elevated without asking
+  --no-restart     do not restart Explorer afterwards
   --no-backup      do not export .reg backups (not recommended)
   --backup-dir D   where to write backups
-  --no-restart     do not restart Explorer afterwards
-  --show-elevate   show the elevated command instead of running it
-  --selftest       report the process identity and whether it can write
-                   to HKCU at all, then exit (diagnostic)
+  --keep-open      wait for Enter before exiting so the window stays
+  --no-color       plain output (given automatically when redirected)
+
+Diagnostics:
+  --selftest       can this process write to HKCU? (run-path problem)
+  --stdin-info     is stdin a real terminal? (input problem)
+  --log <file>     trace what every prompt actually read
+  --show-elevate   print the elevated command instead of running it
   --force-write    skip the elevation guard; HKLM will still fail
+
+Misc:
   --version        print the version
   --help           this text
 ```
+
+That is exactly what `CtxMenuCleaner.exe --help` prints, so this section cannot drift
+far from the binary. The Chinese equivalent follows.
+
+### 参数中文对照
+
+| 参数 | 含义 |
+|---|---|
+| `--list` | 只列清单；不需要管理员，不改变任何东西 |
+| `--all` | 连 Windows 内置项一起列出 |
+| `--select N[,M...]` | 直接指定编号删除，例如 `--select 3,7` |
+| `--dry-run` | 只显示将要做什么，不删除 |
+| `--yes` | 跳过 `Type YES` 确认，整条命令不读键盘 |
+| `--grid` | 用可搜索的勾选窗口挑选 |
+| `--auto-elevate` | 非管理员时直接提权，不询问 |
+| `--no-restart` | 不重启 explorer |
+| `--no-backup` | 不导出 `.reg` 备份（不推荐） |
+| `--backup-dir D` | 备份写入目录 |
+| `--keep-open` | 退出前等待回车，避免窗口一闪而过 |
+| `--no-color` | 纯文本输出（重定向时自动生效） |
+| `--selftest` | 诊断：本进程能否写 HKCU（排查"启动路径导致的写权限问题"） |
+| `--stdin-info` | 诊断：stdin 是否为真实终端（排查交互无响应） |
+| `--log <文件>` | 记录每次提示实际读到了什么 |
+| `--show-elevate` | 只打印将要执行的提权命令，不执行 |
+| `--force-write` | 跳过提权保护（HKLM 仍会被系统拒绝，仅供调试） |
+| `--version` / `--help` | 打印版本 / 打印帮助 |
+
+### 配色说明
+
+在**真实控制台**里输出带颜色：组件行白色、细节行暗灰、**被空格填充的键名行黄色**、
+`-> DELETED` 与 `Explorer is running` 绿色、失败红色。当输出被**重定向或经管道**时
+（`Console.IsOutputRedirected`）自动降级为纯文本，所以脚本抓取输出不受影响；
+也可用 `--no-color` 强制纯文本。
 
 Deleting needs an elevated process. Without it the tool offers to re-launch itself via
 UAC (`ShellExecute` with the `runas` verb); `--show-elevate` prints the command instead
