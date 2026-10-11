@@ -50,7 +50,7 @@ namespace CtxMenuCleaner
     internal static class Program
     {
         private const string Product = "CtxMenuCleaner";
-        private const string Version = "1.1.1";
+        private const string Version = "1.1.3";
 
         private static readonly string[] ClassKeys = new string[]
         {
@@ -156,11 +156,15 @@ namespace CtxMenuCleaner
             List<Entry> entries = Collect();
             List<Group> groups = Group2(entries);
 
+            // Colour only when stdout is a real console: redirected or piped output stays
+            // plain text, which is what scripts expect.
+            if (Has(args, "--no-color") || Console.IsOutputRedirected) SayColourOff();
+
             int windowsCount = 0, thirdCount = 0;
             foreach (Group g in groups) { if (g.Windows) windowsCount++; else thirdCount++; }
 
-            Console.WriteLine("Found " + groups.Count + " component(s): " +
-                              thirdCount + " third-party, " + windowsCount + " Windows built-in.");
+            Say("Found " + groups.Count + " component(s): " +
+                thirdCount + " third-party, " + windowsCount + " Windows built-in.");
 
             // Assign the slot numbers ONCE, here. Both the listing and every selection
             // path share this map, so --select N, the interactive prompt and the elevated
@@ -347,18 +351,19 @@ namespace CtxMenuCleaner
                 string err;
                 if (DeleteKey(e, out err))
                 {
-                    Console.WriteLine("        -> DELETED");
+                    Say("        -> DELETED", ConsoleColor.Green);
                     ok++;
                 }
                 else
                 {
-                    Console.WriteLine("        -> FAILED: " + err);
+                    Say("        -> FAILED: " + err, ConsoleColor.Red);
                     bad++;
                 }
             }
 
             Console.WriteLine();
-            Console.WriteLine("Deleted " + ok + ", failed " + bad + ".");
+            if (bad > 0) Say("Deleted " + ok + ", failed " + bad + ".", ConsoleColor.Yellow);
+            else Say("Deleted " + ok + ", failed " + bad + ".", ConsoleColor.Green);
             if (!noBackup) Console.WriteLine("Backups in " + backupDir);
 
             if (!noRestart)
@@ -409,6 +414,36 @@ namespace CtxMenuCleaner
             if (s.Length > 120) s = s.Substring(0, 120) + "...";
             return "\"" + s + "\"";
         }
+
+        // ------------------------------------------------------------- output
+
+        // Colour is applied only when stdout is a real console, so piping or redirecting the
+        // output still yields clean text with no escape codes. Colors are restored
+        // immediately after each write.
+        private static bool _colour = true;
+
+        private static void Say(string text, ConsoleColor? colour = null)
+        {
+            if (colour == null || !_colour)
+            {
+                Console.WriteLine(text);
+                return;
+            }
+            ConsoleColor previous = Console.ForegroundColor;
+            try
+            {
+                Console.ForegroundColor = colour.Value;
+                Console.WriteLine(text);
+            }
+            catch (IOException) { Console.WriteLine(text); }
+            catch (ArgumentException) { Console.WriteLine(text); }
+            finally
+            {
+                try { Console.ForegroundColor = previous; } catch { }
+            }
+        }
+
+        private static void SayColourOff() { _colour = false; }
 
         // ------------------------------------------------- interactive tracing
 
@@ -981,34 +1016,43 @@ namespace CtxMenuCleaner
         {
             Console.WriteLine(Product + " " + Version + " - clean up Explorer right-click menu entries");
             Console.WriteLine();
+            Console.WriteLine("Usage:");
             Console.WriteLine("  CtxMenuCleaner.exe                     interactive: list, then pick numbers");
             Console.WriteLine("  CtxMenuCleaner.exe --list              list only (no admin needed)");
-            Console.WriteLine("  CtxMenuCleaner.exe --all               include Windows built-ins in the list");
-            Console.WriteLine("  CtxMenuCleaner.exe --grid              pick in a searchable window");
             Console.WriteLine("  CtxMenuCleaner.exe --select 3,7        remove those numbers");
-            Console.WriteLine("  CtxMenuCleaner.exe --dry-run           show what would happen");
+            Console.WriteLine("  CtxMenuCleaner.exe --select 3,7 --yes  same, without any prompting");
             Console.WriteLine();
-            Console.WriteLine("  --yes            skip the YES confirmation");
+            Console.WriteLine("Options:");
+            Console.WriteLine("  --list           list components only; no admin, changes nothing");
+            Console.WriteLine("  --all            include Windows built-ins in the list");
+            Console.WriteLine("  --select N[,M]   remove these slot numbers");
+            Console.WriteLine("  --dry-run        show what would happen, delete nothing");
+            Console.WriteLine("  --yes            skip the YES confirmation (reads no keyboard input)");
+            Console.WriteLine("  --grid           pick with a searchable check-box window");
+            Console.WriteLine("  --auto-elevate   re-launch elevated without asking");
+            Console.WriteLine("  --no-restart     do not restart Explorer afterwards");
             Console.WriteLine("  --no-backup      do not export .reg backups (not recommended)");
             Console.WriteLine("  --backup-dir D   where to write backups");
-            Console.WriteLine("  --no-restart     do not restart Explorer afterwards");
-            Console.WriteLine("  --show-elevate   show the elevated command instead of running it");
-            Console.WriteLine("  --selftest       report the process identity and whether it can write");
-            Console.WriteLine("                   to HKCU at all, then exit (diagnostic)");
-            Console.WriteLine("  --keep-open      wait for Enter before exiting (for windows that would");
-            Console.WriteLine("                   otherwise close; added automatically when self-elevating)");
-            Console.WriteLine("  --stdin-info     report whether stdin can actually be read, then exit");
-            Console.WriteLine("                   (use when the interactive prompt seems to answer itself)");
-            Console.WriteLine("  --auto-elevate   re-launch elevated without asking (avoids a prompt that");
-            Console.WriteLine("                   can consume a typed answer on some terminals)");
-            Console.WriteLine("  --log <file>     append a trace of prompts and answers to <file>");
+            Console.WriteLine("  --keep-open      wait for Enter before exiting so the window stays");
+            Console.WriteLine("  --no-color       plain output (given automatically when redirected)");
+            Console.WriteLine();
+            Console.WriteLine("Diagnostics:");
+            Console.WriteLine("  --selftest       can this process write to HKCU? (run-path problem)");
+            Console.WriteLine("  --stdin-info     is stdin a real terminal? (input problem)");
+            Console.WriteLine("  --log <file>     trace what every prompt actually read");
+            Console.WriteLine("  --show-elevate   print the elevated command instead of running it");
             Console.WriteLine("  --force-write    skip the elevation guard; HKLM will still fail");
+            Console.WriteLine();
+            Console.WriteLine("Misc:");
             Console.WriteLine("  --version        print the version");
             Console.WriteLine("  --help           this text");
             Console.WriteLine();
-            Console.WriteLine("Both 32-bit and 64-bit registry views are handled by this one process.");
-            Console.WriteLine("Windows built-ins are never selected by default; --select can still");
-            Console.WriteLine("target them deliberately.");
+            Console.WriteLine("Notes:");
+            Console.WriteLine("  Both 32-bit and 64-bit registry views are handled by this one process.");
+            Console.WriteLine("  Windows built-ins are never selected by default; --select can still");
+            Console.WriteLine("  target them deliberately.");
+            Console.WriteLine("  Slot numbers come from --list and can change between runs.");
+            Console.WriteLine("  Interactive mode requires an upper-case YES before it deletes.");
         }
 
         // Assign slot numbers once. Third-party components come first so that "1" is the
@@ -1036,7 +1080,7 @@ namespace CtxMenuCleaner
             Console.WriteLine();
             if (showWindows)
             {
-                Console.WriteLine("=== Windows built-ins (NOT selected unless you name them) ===");
+                Say("=== Windows built-ins (NOT selected unless you name them) ===", ConsoleColor.DarkGray);
             }
 
             int shown = 0;
@@ -1045,22 +1089,27 @@ namespace CtxMenuCleaner
                 if (g.Windows && !showWindows) continue;
                 shown++;
                 string tag = g.Windows ? " (built-in)" : "";
-                Console.WriteLine("  [" + g.Key.PadLeft(3) + "] " + g.Label +
-                                  "   (" + g.Entries.Count + " registration(s))" + tag);
-                if (g.Detail != null) Console.WriteLine("        " + g.Detail);
+                Say("  [" + g.Key.PadLeft(3) + "] " + g.Label +
+                    "   (" + g.Entries.Count + " registration(s))" + tag, ConsoleColor.White);
+                if (g.Detail != null) Say("        " + g.Detail, ConsoleColor.DarkGray);
                 foreach (Entry e in g.Entries)
                 {
                     string shape = e.Shape == "verb" ? "static verb" : "COM handler ";
                     string pad = e.Padded ? "   [padded key name]" : "";
-                    Console.WriteLine("        " + e.ClassKey.PadRight(24) + shape + "  " +
-                                      e.View + "-bit " + e.Hive + pad);
+                    // A padded key name is the single most important thing to notice in this
+                    // listing, so that row is highlighted rather than printed in the normal
+                    // dim colour.
+                    Say("        " + e.ClassKey.PadRight(24) + shape + "  " +
+                        e.View + "-bit " + e.Hive + pad,
+                        e.Padded ? ConsoleColor.Yellow : ConsoleColor.DarkGray);
                 }
             }
             Console.WriteLine();
-            Console.WriteLine("(" + shown + " slot(s) shown of " + indexToGroup.Count + " total. " +
-                              (showWindows
-                                  ? "Windows built-ins included.)"
-                                  : "Windows built-ins are numbered too but not shown; --all shows them.)"));
+            Say("(" + shown + " slot(s) shown of " + indexToGroup.Count + " total. " +
+                (showWindows
+                    ? "Windows built-ins included.)"
+                    : "Windows built-ins are numbered too but not shown; --all shows them.)"),
+                ConsoleColor.DarkGray);
         }
 
         // Resolve a selection spec against the shared numbering. Valid numbers are recorded
@@ -1261,8 +1310,8 @@ namespace CtxMenuCleaner
                 }
 
                 Process[] now = Process.GetProcessesByName("explorer");
-                if (now.Length > 0) Console.WriteLine("Explorer is running (pid " + now[0].Id + ").");
-                else Console.WriteLine("WARNING: Explorer is not running; start it from Task Manager.");
+                if (now.Length > 0) Say("Explorer is running (pid " + now[0].Id + ").", ConsoleColor.Green);
+                else Say("WARNING: Explorer is not running; start it from Task Manager.", ConsoleColor.Red);
             }
             catch (Exception ex)
             {
