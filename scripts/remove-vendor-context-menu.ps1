@@ -3,7 +3,10 @@
 #   .\remove-vendor-context-menu.ps1                 # scan + remove (needs admin)
 #   .\remove-vendor-context-menu.ps1 -DryRun         # scan only, delete nothing
 #   .\remove-vendor-context-menu.ps1 -Pattern MyApp  # extra key-name substrings
-#   .\remove-vendor-context-menu.ps1 -VendorsFile .\scripts\vendors.json
+#   .\remove-vendor-context-menu.ps1 -VendorsFile .\my-vendors.json
+#                                                    # ONLY the patterns in that file
+#   .\remove-vendor-context-menu.ps1 -VendorsFile .\my-vendors.json -IncludeBuiltIn
+#                                                    # that file PLUS the built-in list
 #
 # Verified on Windows 10 22H2 (19045) with Windows PowerShell 5.1.
 #
@@ -32,6 +35,7 @@ param(
     [switch]$NoPause,
     [string[]]$Pattern,
     [string]$VendorsFile,
+    [switch]$IncludeBuiltIn,
     [string]$BackupDir
 )
 
@@ -74,24 +78,40 @@ function ConvertFrom-UnicodeEscapes([string]$s) {
     return $rx.Replace($s, $ev)
 }
 
+# -VendorsFile REPLACES the built-in defaults; -IncludeBuiltIn merges both lists.
+# This used to be additive only: a caller who passed a three-pattern file still had
+# every built-in pattern applied, so keys such as "    sgshellext" and
+# "YunShellExplorerCommand" were deleted even though nobody asked for them.
+$explicitVendors = $PSBoundParameters.ContainsKey('VendorsFile') -and -not [string]::IsNullOrWhiteSpace($VendorsFile)
+$useBuiltIn = (-not $explicitVendors) -or $IncludeBuiltIn
+
 $patternList = New-Object System.Collections.Generic.List[string]
-foreach ($p in @(
-        'sgshellext'
-        'biz_shell'
-        'YunShellExt'
-        'YunShellExplorerCommand'
-        'YunShellCommand'
-        'UploadToThunderPan'
-        'BaiduNetdisk'
-        (U @(0x641C, 0x72D7))
-        (U @(0x8BAF, 0x96F7))
-        (U @(0x767E, 0x5EA6))
-        (U @(0x7F51, 0x76D8))
-    )) { $patternList.Add($p) }
+if ($useBuiltIn) {
+    foreach ($p in @(
+            'sgshellext'
+            'biz_shell'
+            'YunShellExt'
+            'YunShellExplorerCommand'
+            'YunShellCommand'
+            'UploadToThunderPan'
+            'BaiduNetdisk'
+            (U @(0x641C, 0x72D7))
+            (U @(0x8BAF, 0x96F7))
+            (U @(0x767E, 0x5EA6))
+            (U @(0x7F51, 0x76D8))
+        )) { $patternList.Add($p) }
+}
 
 if (-not $VendorsFile) {
     $cand = Join-Path (Split-Path -Parent $PSCommandPath) 'vendors.json'
     if (Test-Path -LiteralPath $cand) { $VendorsFile = $cand }
+}
+
+if ($explicitVendors -and -not (Test-Path -LiteralPath $VendorsFile)) {
+    Write-Host ('ERROR: vendors file not found: ' + $VendorsFile) -ForegroundColor Red
+    Write-Host '       Refusing to fall back to the built-in list silently.' -ForegroundColor Red
+    if (-not $NoPause) { Read-Host 'Press Enter to exit' }
+    exit 1
 }
 
 if ($VendorsFile -and (Test-Path -LiteralPath $VendorsFile)) {
@@ -102,7 +122,8 @@ if ($VendorsFile -and (Test-Path -LiteralPath $VendorsFile)) {
             if ($v.skip) { continue }
             foreach ($p in $v.patterns) { $patternList.Add((ConvertFrom-UnicodeEscapes ([string]$p))); $n++ }
         }
-        Write-Host ('Loaded ' + $n + ' patterns from ' + $VendorsFile)
+        $src = if ($useBuiltIn) { ' (built-in defaults also active)' } else { ' (built-in defaults skipped)' }
+        Write-Host ('Loaded ' + $n + ' patterns from ' + $VendorsFile + $src)
     } catch {
         Write-Host ('WARN: could not read ' + $VendorsFile + ': ' + $_.Exception.Message) -ForegroundColor Yellow
     }
@@ -110,6 +131,7 @@ if ($VendorsFile -and (Test-Path -LiteralPath $VendorsFile)) {
 
 foreach ($p in $Pattern) { if ($p) { $patternList.Add($p) } }
 $patternList = @($patternList | Where-Object { $_ } | Select-Object -Unique)
+Write-Host ('Effective patterns: ' + $patternList.Count) -ForegroundColor DarkGray
 
 # --- registration locations that can produce a context-menu item -------------
 $classes = @(
@@ -227,39 +249,50 @@ if (-not $is32bit) {
     if (Test-Path -LiteralPath $sys32) {
         Write-Host ''
         Write-Host '=== Switching to the 32-bit view (re-launching in 32-bit PowerShell) ===' -ForegroundColor Cyan
-        $childArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "$PSCommandPath", '-NoPause')
-        if ($DryRun) { $childArgs += '-DryRun' }
-        if ($VendorsFile) { $childArgs += @('-VendorsFile', $VendorsFile) }
-        if ($BackupDir) { $childArgs += @('-BackupDir', $BackupDir) }
-        foreach ($p in $Pattern) { $childArgs += @('-Pattern', $p) }
-        & $sys32 @childArgs
+        # -File cannot carry an array, and emitting "-Pattern a -Pattern b" makes the
+        # child die with "parameter 'Pattern' is specified more than once" - which also
+        # meant the 32-bit view was silently never scanned when -Pattern was used.
+        # Build a -Command line instead so array parameters survive the hand-off.
+        function Quote-Arg([string]$s) { "'" + ($s -replace "'", "''") + "'" }
+        $childCmd = '& ' + (Quote-Arg $PSCommandPath) + ' -NoPause'
+        if ($DryRun) { $childCmd += ' -DryRun' }
+        if ($IncludeBuiltIn) { $childCmd += ' -IncludeBuiltIn' }
+        if ($VendorsFile) { $childCmd += ' -VendorsFile ' + (Quote-Arg $VendorsFile) }
+        if ($BackupDir) { $childCmd += ' -BackupDir ' + (Quote-Arg $BackupDir) }
+        if ($Pattern -and $Pattern.Count -gt 0) {
+            $q = ($Pattern | ForEach-Object { Quote-Arg ([string]$_) }) -join ','
+            $childCmd += ' -Pattern @(' + $q + ')'
+        }
+        & $sys32 -NoProfile -ExecutionPolicy Bypass -Command $childCmd
     } else {
         Write-Host 'WARN: 32-bit PowerShell not found; the 32-bit view was not cleaned.' -ForegroundColor Yellow
     }
 }
 
 # --- final re-check + explorer restart -------------------------------------
-if (-not $is32bit) {
-    Write-Host ''
-    Write-Host '=== Final re-check (this view) ===' -ForegroundColor Cyan
-    $left = 0
-    foreach ($root in $roots) {
-        foreach ($cls in $classes) {
-            foreach ($kind in $kinds) {
-                $rel = $cls + $bs + $kind
-                $psContainer = $root.PS + $rel
-                if (-not (Test-Path -LiteralPath $psContainer)) { continue }
-                foreach ($child in @(Get-ChildItem -LiteralPath $psContainer -ErrorAction SilentlyContinue)) {
-                    if (Test-Offender $child.PSChildName $child) {
-                        Write-Host ('  REMAINS ' + $root.Hive + ' ' + $rel + $bs + '[' + $child.PSChildName + ']') -ForegroundColor Red
-                        $left++
-                    }
+# --- final re-check (every view verifies itself, including the 32-bit child) --
+Write-Host ''
+Write-Host ('=== Final re-check (' + $viewLabel + ') ===') -ForegroundColor Cyan
+$left = 0
+foreach ($root in $roots) {
+    foreach ($cls in $classes) {
+        foreach ($kind in $kinds) {
+            $rel = $cls + $bs + $kind
+            $psContainer = $root.PS + $rel
+            if (-not (Test-Path -LiteralPath $psContainer)) { continue }
+            foreach ($child in @(Get-ChildItem -LiteralPath $psContainer -ErrorAction SilentlyContinue)) {
+                if (Test-Offender $child.PSChildName $child) {
+                    Write-Host ('  REMAINS ' + $root.Hive + ' ' + $rel + $bs + '[' + $child.PSChildName + ']') -ForegroundColor Red
+                    $left++
                 }
             }
         }
     }
-    if ($left -eq 0) { Write-Host ('CLEAN: nothing matched in the ' + $viewLabel + '.') -ForegroundColor Green }
+}
+if ($left -eq 0) { Write-Host ('CLEAN: nothing matched in the ' + $viewLabel + '.') -ForegroundColor Green }
 
+# --- explorer restart + closing notes (64-bit parent only) -------------------
+if (-not $is32bit) {
     if (-not $DryRun) {
         Write-Host ''
         Write-Host ('Backups: ' + $backupCount + ' key(s) exported to ' + $BackupDir) -ForegroundColor DarkGray

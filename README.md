@@ -5,8 +5,9 @@
 
 [English](./README.en.md) · [更新记录](./CHANGELOG.md) · [MIT 许可证](./LICENSE)
 
-**当前版本 v1.1.3。** 提供两种用法：一个**原生可执行文件**（推荐，单文件、无需 PowerShell），
-和一套**PowerShell 脚本**（无需编译，便于审计与二次开发）。
+**当前版本 v1.1.4。** 提供两种用法：一个**原生可执行文件**（推荐，单文件、无需 PowerShell），
+和一套**PowerShell 脚本**（无需编译，便于审计与二次开发）。v1.1.4 只修了
+`scripts/remove-vendor-context-menu.ps1`，`CtxMenuCleaner.exe` 仍是 1.1.3。
 
 ---
 
@@ -285,7 +286,8 @@ Type YES to confirm: YES          ← 必须是大写 YES
 
 ```powershell
 PS> .\scripts\remove-vendor-context-menu.ps1 -DryRun
-Loaded 24 patterns from ...\scripts\vendors.json
+Loaded 24 patterns from ...\scripts\vendors.json (built-in defaults also active)
+Effective patterns: 24
 
 MATCH  HKLM /reg:64 *\shellex\ContextMenuHandlers
        key name : [    sgshellext]  length=14   <== PADDED NAME
@@ -295,6 +297,21 @@ MATCH  HKLM /reg:64 *\shellex\ContextMenuHandlers
 ```
 
 去掉 `-DryRun` 并以管理员运行，每条命中项会变成 `-> DELETED` 或 `-> FAILED (exit N): ...`
+
+> **`-VendorsFile` 是替换，不是追加。** 传了自己的名单之后，脚本**不再**套用内置关键词；要两者叠加请加 `-IncludeBuiltIn`。日志里的 `Effective patterns: N` 是实际生效的数量，动手前先看一眼这个数字。
+>
+> ```powershell
+> # 只删自己名单里的
+> .\scripts\remove-vendor-context-menu.ps1 -VendorsFile .\my-vendors.json -DryRun
+> # 自己名单 + 内置关键词（旧行为）
+> .\scripts\remove-vendor-context-menu.ps1 -VendorsFile .\my-vendors.json -IncludeBuiltIn -DryRun
+> ```
+>
+> 系统执行策略为默认的 Restricted 时，`& script.ps1` 会被直接拒绝，需要绕过：
+>
+> ```powershell
+> powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\remove-vendor-context-menu.ps1 -DryRun
+> ```
 
 ### 示例 F —— 排查"这菜单项到底是谁"
 

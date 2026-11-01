@@ -6,9 +6,10 @@ delete with a rollback path, and never report a success that did not happen**.
 
 [中文说明](./README.md) · [Changelog](./CHANGELOG.md) · [MIT licence](./LICENSE)
 
-**Current release: v1.1.3.** Two ways to use it: a **native executable** (recommended —
+**Current release: v1.1.4.** Two ways to use it: a **native executable** (recommended —
 single file, no PowerShell), and a set of **PowerShell scripts** (no build step, easy to
-audit and extend).
+audit and extend). v1.1.4 only fixes `scripts/remove-vendor-context-menu.ps1`;
+`CtxMenuCleaner.exe` is still 1.1.3.
 
 ---
 

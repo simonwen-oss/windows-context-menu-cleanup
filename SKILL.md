@@ -50,6 +50,12 @@ these keys by a fixed name, and never trust an unverified "success".**
    Start with `-DryRun` (no admin needed, deletes nothing), then run it elevated.
    It exports a `.reg` backup per key before deleting, covers **both** registry views
    automatically, and re-verifies afterwards.
+
+   **`-VendorsFile` replaces the built-in list; `-IncludeBuiltIn` merges the two.** The
+   built-in defaults cover Sogou, Baidu Netdisk, Thunder, 360 and similar. When the user
+   asked for one specific vendor, pass `-VendorsFile` (or `-Pattern`) and read the
+   `Effective patterns: N` line before running without `-DryRun` — otherwise you will also
+   delete vendors they never mentioned.
 4. **Verify** by re-enumerating: confirm the key is gone, not merely that the command
    exited 0.
 5. **Restart Explorer** so the menu refreshes. The script does this and confirms a new

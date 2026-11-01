@@ -3,6 +3,44 @@
 All notable changes to this project are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.4] - 2026-11-01
+
+Bug fixes in `scripts/remove-vendor-context-menu.ps1`, found while using the script on a real
+machine. Two of them had silently wrong behaviour rather than a visible error.
+
+### Fixed
+
+- **`-VendorsFile` replaced nothing.** The built-in pattern list was populated first and the
+  file's patterns were appended to it, so a caller who passed a three-pattern file still had
+  every built-in pattern applied. In practice a file listing `EPP`, `NTQQShellExt` and
+  `QQMusic` also deleted `    sgshellext` (Sogou) and `YunShellExplorerCommand` (Baidu
+  Netdisk) — entries nobody asked for. The log said `Loaded 3 patterns`, which made it look
+  correct. `-VendorsFile` now **replaces** the built-in list; the new `-IncludeBuiltIn` switch
+  restores the old additive behaviour.
+- **`-Pattern` broke the 32-bit hand-off.** The child process was launched with one
+  `-Pattern` switch per element, which PowerShell rejects with "parameter 'Pattern' is
+  specified more than once". The child died before scanning, so the 32-bit view was never
+  covered whenever `-Pattern` was used. The child is now launched through `-Command` so array
+  parameters survive.
+- **The final re-check only ran in the 64-bit view.** A clean 32-bit result was never
+  verified. Each view now re-checks itself before exiting.
+- **A missing `-VendorsFile` was silently ignored**, falling back to the built-in list with no
+  message. It now exits with code 1 and says so.
+
+### Changed
+
+- The pattern-loading log now reports whether the built-in list was also active, and a new
+  `Effective patterns: N` line shows how many patterns are actually in force.
+
+### Verified
+
+- `-VendorsFile` with a single pattern reports `Effective patterns: 1` and
+  `(built-in defaults skipped)`; it no longer matches Sogou or Baidu entries.
+- `-Pattern` with two elements now scans both views (`Effective patterns: 26`) and reaches
+  the 32-bit child without a binder error.
+- A non-existent `-VendorsFile` exits 1 with `ERROR: vendors file not found`.
+- Script parses with zero syntax diagnostics under Windows PowerShell 5.1.
+
 ## [1.1.3] - 2026-10-06
 
 Documentation and usability. The PowerShell scripts are unchanged.
